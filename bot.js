@@ -116,8 +116,8 @@ bot.onText(/\/terms/, (msg) => {
       reply_markup: {
         inline_keyboard: [
           [
-            { text: "📄 Full Terms of Service", url: "https://your" },
-            { text: "🔒 Privacy Policy", url: "https://telegram-bot-1-qzck.onrender.com/terms" }
+            { text: "📄 Full Terms of Service", url: "https://telegram-bot-1-qzck.onrender.com/terms" },
+            { text: "🔒 Privacy Policy", url: "https://telegram-bot-1-qzck.onrender.com/privacy" }
           ]
         ]
       }
