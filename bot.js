@@ -8,7 +8,12 @@ dotenv.config();
 const PORT = process.env.PORT || 3000;
 
 const app = express();
-app.get("/", (req, res) => res.send("Bot is running!"));
+
+app.set("view engine", "ejs");
+
+app.get("/", (req, res) => res.render("home"));
+app.get("/privacy", (req, res) => res.render("privacy"));
+app.get("/terms", (req, res) => res.render("terms"));
 app.listen(PORT, () => console.log(`✅ Web server running on port ${PORT}`));
 
 // --- Load API keys from .env ---
@@ -181,7 +186,7 @@ bot.on("callback_query", (query) => {
 });
 
   
-  
+
 
 // --- Chat with Gemini ---
 bot.on("message", async (msg) => {
