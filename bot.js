@@ -1,9 +1,15 @@
 // telegram-bot.js
+import express from 'express';
 import TelegramBot from "node-telegram-bot-api";
 import dotenv from "dotenv";
 import { GoogleGenerativeAI } from "@google/generative-ai";
 
 dotenv.config();
+const PORT = process.env.PORT || 3000;
+
+const app = express();
+app.get("/", (req, res) => res.send("Bot is running!"));
+app.listen(PORT, () => console.log(`✅ Web server running on port ${PORT}`));
 
 // --- Load API keys from .env ---
 const TELEGRAM_TOKEN = process.env.TELEGRAM_TOKEN;
@@ -66,13 +72,10 @@ bot.onText(/\/about/, (msg) => {
 - Google Gemini AI
 - Node.js`);
 });
-
-
   
 bot.onText(/\/clearchat/, (msg) => {
     bot.sendMessage(msg.chat.id, "🧹 Your chat history has been cleared. Start fresh anytime!");
 });
-
 
 bot.onText(/\/terms/, (msg) => {
     const chatId = msg.chat.id;
@@ -101,10 +104,48 @@ bot.onText(/\/terms/, (msg) => {
   });
   
   
+const DEFAULT_LIMIT = 20; // requests per day
+const userData = {}; // { chatId: { requests: 0, limit: 20, lastReset: Date } }
+
+function resetUserLimits() {
+    const now = new Date();
   
+    for (const chatId in userData) {
+      const user = userData[chatId];
+      const lastReset = user.lastReset || new Date(0);
+      
+      // If last reset was before today, reset requests
+      if (lastReset.toDateString() !== now.toDateString()) {
+        user.requests = 0;
+        user.lastReset = now;
+      }
+    }
+  }
+  
+// Run reset every hour (or any interval)
+setInterval(resetUserLimits, 60 * 60 * 1000); // every 1 hour
+
 bot.onText(/\/account/, (msg) => {
-    bot.sendMessage(msg.chat.id, "👤 Your account info will appear here.");
-});
+    const chatId = msg.chat.id;
+  
+    if (!userData[chatId]) {
+      userData[chatId] = { requests: 0, limit: DEFAULT_LIMIT, lastReset: new Date() };
+    }
+  
+    const user = userData[chatId];
+    const remaining = user.limit - user.requests;
+  
+    bot.sendMessage(chatId, `
+  👤 *My Account*
+  
+  - Requests used today: ${user.requests}
+  - Requests remaining: ${remaining}
+  - Daily limit: ${user.limit}
+  
+  💡 Your requests reset every 24 hours.
+    `, { parse_mode: "Markdown" });
+  });
+  
 
 bot.onText(/\/language/, (msg) => {
     const chatId = msg.chat.id;
@@ -144,26 +185,52 @@ bot.on("callback_query", (query) => {
 
 // --- Chat with Gemini ---
 bot.on("message", async (msg) => {
-    const chatId = msg.chat.id;
-    const text = msg.text;
-  
-    if (!text || text.startsWith("/")) return;
-  
-    const lang = userLanguages[chatId] || "en"; // default = English
-  
-    try {
-      bot.sendChatAction(chatId, "typing");
-  
-      // Add language instruction for Gemini
-      const result = await model.generateContent(
-        `Answer in ${LANGUAGES[lang]} (${lang}): ${text}`
-      );
-  
-      const reply = result.response.text();
-      bot.sendMessage(chatId, reply);
-    } catch (err) {
-      console.error(err);
-      bot.sendMessage(chatId, "⚠️ Error: Could not process your request.");
-    }
+  const chatId = msg.chat.id;
+  const text = msg.text;
+
+  if (!text || text.startsWith("/")) return; // ignore non-text or commands
+
+  // Initialize user data if first time
+  if (!userData[chatId]) {
+    userData[chatId] = { requests: 0, limit: DEFAULT_LIMIT, lastReset: new Date() };
+  }
+
+  const user = userData[chatId];
+
+  // Reset daily limit if lastReset is not today
+  if (user.lastReset.toDateString() !== new Date().toDateString()) {
+    user.requests = 0;
+    user.lastReset = new Date();
+  }
+
+  // Check if user exceeded daily limit
+  if (user.requests >= user.limit) {
+    bot.sendMessage(
+      chatId,
+      `⚠️ You have reached your daily limit (${user.limit} requests). Your quota will reset tomorrow.`
+    );
+    return;
+  }
+
+  const lang = userLanguages[chatId] || "en"; // default language
+
+  try {
+    bot.sendChatAction(chatId, "typing");
+
+    // Ask Gemini and pass prompt with language
+    const result = await model.generateContent(
+      `Answer in ${LANGUAGES[lang]} (${lang}): ${text}`
+    );
+    const reply = result.response.text();
+
+    bot.sendMessage(chatId, reply);
+
+    // Increment user's request count
+    user.requests += 1;
+  } catch (err) {
+    console.error(err);
+    bot.sendMessage(chatId, "⚠️ Error: Could not process your request.");
+  }
 });
+
   
