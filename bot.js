@@ -14,14 +14,28 @@ app.set("view engine", "ejs");
 app.get("/", (req, res) => res.render("home"));
 app.get("/privacy", (req, res) => res.render("privacy"));
 app.get("/terms", (req, res) => res.render("terms"));
-app.listen(PORT, () => console.log(`✅ Web server running on port ${PORT}`));
+
 
 // --- Load API keys from .env ---
 const TELEGRAM_TOKEN = process.env.TELEGRAM_TOKEN;
 const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
 
 // --- Initialize Telegram Bot ---
-const bot = new TelegramBot(TELEGRAM_TOKEN, { polling: true });
+const bot = new TelegramBot(TELEGRAM_TOKEN);
+
+// 2️⃣ Set the webhook URL
+bot.setWebHook(`https://telegram-bot-1-qzck.onrender.com/bot${TELEGRAM_TOKEN}`);
+
+// 3️⃣ Express route to receive updates
+app.use(express.json());
+app.post(`/bot${TELEGRAM_TOKEN}`, (req, res) => {
+  bot.processUpdate(req.body);
+  res.sendStatus(200);
+});
+
+
+app.listen(PORT, () => console.log(`✅ Web server running on port ${PORT}`));
+
 
 // --- Register Commands with Telegram ---
 bot.setMyCommands([
@@ -100,8 +114,8 @@ bot.onText(/\/terms/, (msg) => {
       reply_markup: {
         inline_keyboard: [
           [
-            { text: "📄 Full Terms of Service", url: "https://yourwebsite.com/terms" },
-            { text: "🔒 Privacy Policy", url: "https://yourwebsite.com/privacy" }
+            { text: "📄 Full Terms of Service", url: "https://your" },
+            { text: "🔒 Privacy Policy", url: "https://telegram-bot-1-qzck.onrender.com/terms" }
           ]
         ]
       }
