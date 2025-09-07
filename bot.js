@@ -9,8 +9,10 @@ const PORT = process.env.PORT || 3000;
 
 const app = express();
 
+// -- set view engine to ejs --
 app.set("view engine", "ejs");
 
+// -- ejs files
 app.get("/", (req, res) => res.render("home"));
 app.get("/privacy", (req, res) => res.render("privacy"));
 app.get("/terms", (req, res) => res.render("terms"));
@@ -33,7 +35,7 @@ app.post(`/bot${TELEGRAM_TOKEN}`, (req, res) => {
   res.sendStatus(200);
 });
 
-
+// --- Running on this port ---
 app.listen(PORT, () => console.log(`✅ Web server running on port ${PORT}`));
 
 
