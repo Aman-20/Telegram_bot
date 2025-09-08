@@ -22,6 +22,8 @@ const userSchema = new mongoose.Schema({
       timestamp: { type: Date, default: Date.now }
     }
   ],
+  requests: { type: Number, default: 0 },        // daily requests
+  lastReset: { type: Date, default: Date.now },  // daily reset for requests
   usage: {
     tokensUsed: { type: Number, default: 0 },   // total tokens used today
     resetDate: { type: Date, default: Date.now } // when to reset quota
@@ -307,9 +309,8 @@ bot.on("message", async (msg) => {
     user = new User({
       chatId,
       requests: 0,
-      tokensUsed: 0,
-      lastReset: new Date(),
       messages: [],
+      usage: {tokensUsed: 0, resetDate:new Date()},
     });
     await user.save();
   }
@@ -318,9 +319,15 @@ bot.on("message", async (msg) => {
   const today = new Date().toDateString();
   if (user.lastReset.toDateString() !== today) {
     user.requests = 0;
-    user.tokensUsed = 0;
+    //user.tokensUsed = 0;
     user.lastReset = new Date();
-    user.messages = []; // clear memory daily if you want
+    //user.messages = []; // clear memory daily if you want
+  }
+
+  // --- Reset token usage daily ---
+  if (user.usage.resetDate.toDateString() !== today) {
+    user.usage.tokensUsed = 0;
+    user.usage.resetDate = new Date();
   }
 
   // Check request limit (20/day)
