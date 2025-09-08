@@ -317,7 +317,13 @@ bot.on("message", async (msg) => {
   const chatId = msg.chat.id;
   const text = msg.text;
 
-  if (!text || text.startsWith("/")) return; // ignore commands & empty
+  if (text && text.startsWith("/")) return; // ignore commands & empty
+
+  if (!text) {
+    bot.sendMessage(chatId, "📂 No files allowed — please send text only.");
+    return;
+  }
+
 
   // Fetch or create user from DB
   let user = await User.findOne({ chatId });
