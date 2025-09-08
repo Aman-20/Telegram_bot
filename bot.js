@@ -3,9 +3,34 @@ import express from 'express';
 import TelegramBot from "node-telegram-bot-api";
 import dotenv from "dotenv";
 import { GoogleGenerativeAI } from "@google/generative-ai";
+import mongoose from 'mongoose';
+import path from 'path';
 
 dotenv.config();
 const PORT = process.env.PORT || 3000;
+
+mongoose.connect(process.env.MONGODB_CONNECT, { dbName: "Telegram", useNewUrlParser: true, useUnifiedTopology: true}).then((req, res) => {
+  console.log("MongoDb is Connected....");
+});
+
+const userSchema = new mongoose.Schema({
+  chatId: { type: String, required: true, unique: true },
+  messages: [
+    {
+      role: { type: String, enum: ["user", "bot"], required: true },
+      text: String,
+      timestamp: { type: Date, default: Date.now }
+    }
+  ],
+  usage: {
+    tokensUsed: { type: Number, default: 0 },   // total tokens used today
+    resetDate: { type: Date, default: Date.now } // when to reset quota
+  }
+});
+
+const User = mongoose.model("User", userSchema);
+
+
 
 const app = express();
 
@@ -146,27 +171,53 @@ function resetUserLimits() {
 // Run reset every hour (or any interval)
 setInterval(resetUserLimits, 60 * 60 * 1000); // every 1 hour
 
-bot.onText(/\/account/, (msg) => {
-    const chatId = msg.chat.id;
   
-    if (!userData[chatId]) {
-      userData[chatId] = { requests: 0, limit: DEFAULT_LIMIT, lastReset: new Date() };
-    }
-  
-    const user = userData[chatId];
-    const remaining = user.limit - user.requests;
-  
-    bot.sendMessage(chatId, `
-  👤 *My Account*
-  
-  - Requests used today: ${user.requests}
-  - Requests remaining: ${remaining}
-  - Daily limit: ${user.limit}
-  
-  💡 Your requests reset every 24 hours.
-    `, { parse_mode: "Markdown" });
-  });
-  
+
+// --- My Account ---
+bot.onText(/\/account/, async (msg) => {
+  const chatId = msg.chat.id;
+
+  // Fetch user from DB
+  let user = await User.findOne({ chatId });
+  if (!user) {
+    user = new User({
+      chatId,
+      requests: 0,
+      tokensUsed: 0,
+      lastReset: new Date(),
+      messages: [],
+    });
+    await user.save();
+  }
+
+  const remainingRequests = 20 - user.requests;
+  const remainingTokens = 1000 - user.tokensUsed;
+  const lang = userLanguages[chatId] || "en";
+  const resetTime = new Date();
+  resetTime.setHours(24, 0, 0, 0); // midnight reset
+
+  bot.sendMessage(
+    chatId,
+    `
+👤 *My Account*
+
+- Requests used today: ${user.requests}
+- Requests remaining: ${remainingRequests}
+- Daily request limit: 20
+
+- Tokens used today: ${user.tokensUsed}
+- Tokens remaining: ${remainingTokens}
+- Daily token limit: 1000
+- Max tokens per reply: 100
+
+🌍 Current language: ${LANGUAGES[lang]} (${lang})
+
+🕒 Quota resets at: ${resetTime.toLocaleString()}
+    `,
+    { parse_mode: "Markdown" }
+  );
+});
+
 
 bot.onText(/\/language/, (msg) => {
     const chatId = msg.chat.id;
@@ -200,58 +251,150 @@ bot.on("callback_query", (query) => {
     bot.answerCallbackQuery(query.id);
   }
 });
-
   
 
+async function saveMessage(chatId, role, text) {
+  let user = await User.findOne({ chatId });
+  if (!user) {
+    user = new User({ chatId });
+  }
+
+  user.messages.push({ role, text });
+
+  // keep only last 10 messages
+  if (user.messages.length > 10) {
+    user.messages = user.messages.slice(-10);
+  }
+
+  await user.save();
+}
+
+async function checkAndUpdateUsage(chatId, tokensUsedNow) {
+  let user = await User.findOne({ chatId });
+  if (!user) {
+    user = new User({ chatId });
+  }
+
+  const today = new Date();
+  const resetDate = new Date(user.usage.resetDate);
+
+  // reset daily
+  if (today.toDateString() !== resetDate.toDateString()) {
+    user.usage.tokensUsed = 0;
+    user.usage.resetDate = today;
+  }
+
+  if (user.usage.tokensUsed + tokensUsedNow > 1000) {
+    return { allowed: false, remaining: 0 };
+  }
+
+  user.usage.tokensUsed += tokensUsedNow;
+  await user.save();
+
+  return { allowed: true, remaining: 1000 - user.usage.tokensUsed };
+}
 
 // --- Chat with Gemini ---
 bot.on("message", async (msg) => {
   const chatId = msg.chat.id;
   const text = msg.text;
 
-  if (!text || text.startsWith("/")) return; // ignore non-text or commands
+  if (!text || text.startsWith("/")) return; // ignore commands & empty
 
-  // Initialize user data if first time
-  if (!userData[chatId]) {
-    userData[chatId] = { requests: 0, limit: DEFAULT_LIMIT, lastReset: new Date() };
+  // Fetch or create user from DB
+  let user = await User.findOne({ chatId });
+  if (!user) {
+    user = new User({
+      chatId,
+      requests: 0,
+      tokensUsed: 0,
+      lastReset: new Date(),
+      messages: [],
+    });
+    await user.save();
   }
 
-  const user = userData[chatId];
-
-  // Reset daily limit if lastReset is not today
-  if (user.lastReset.toDateString() !== new Date().toDateString()) {
+  // Reset limits daily
+  const today = new Date().toDateString();
+  if (user.lastReset.toDateString() !== today) {
     user.requests = 0;
+    user.tokensUsed = 0;
     user.lastReset = new Date();
+    user.messages = []; // clear memory daily if you want
   }
 
-  // Check if user exceeded daily limit
-  if (user.requests >= user.limit) {
+  // Check request limit (20/day)
+  if (user.requests >= 20) {
     bot.sendMessage(
       chatId,
-      `⚠️ You have reached your daily limit (${user.limit} requests). Your quota will reset tomorrow.`
+      `⚠️ You’ve reached your daily request limit (20). Try again tomorrow.`
     );
     return;
   }
 
-  const lang = userLanguages[chatId] || "en"; // default language
+  // Estimate input tokens
+  const inputTokens = Math.ceil(text.split(/\s+/).length * 1.3);
+
+  // Check token limit (1000/day)
+  if (user.tokensUsed + inputTokens >= 1000) {
+    bot.sendMessage(
+      chatId,
+      `⚠️ You’ve reached your daily token limit (1000). Try again tomorrow.`
+    );
+    return;
+  }
+
+  // Language
+  const lang = userLanguages[chatId] || "en";
 
   try {
     bot.sendChatAction(chatId, "typing");
 
-    // Ask Gemini and pass prompt with language
-    const result = await model.generateContent(
-      `Answer in ${LANGUAGES[lang]} (${lang}): ${text}`
-    );
+    // Get last 10 messages for context
+    const history = user.messages
+      .slice(-10)
+      .map((m) => `${m.role}: ${m.text}`)
+      .join("\n");
+
+    // Ask Gemini with output limit
+    const result = await model.generateContent({
+      contents: [
+        { role: "user", parts: [{ text: `Conversation so far:\n${history}\n\nUser: ${text}` }] },
+      ],
+      generationConfig: { maxOutputTokens: 100 }, // limit 100 per reply
+    });
+
     const reply = result.response.text();
 
-    bot.sendMessage(chatId, reply);
+    // Estimate output tokens
+    const outputTokens = Math.ceil(reply.split(/\s+/).length * 1.3);
 
-    // Increment user's request count
+    // Check again after output
+    if (user.tokensUsed + inputTokens + outputTokens > 1000) {
+      bot.sendMessage(
+        chatId,
+        "⚠️ This reply would exceed your daily token limit (1000). Try again tomorrow."
+      );
+      return;
+    }
+
+    // Save messages in MongoDB (memory)
+    user.messages.push({ role: "user", text });
+    user.messages.push({ role: "bot", text: reply });
+
+    // Update usage
     user.requests += 1;
+    user.tokensUsed += inputTokens + outputTokens;
+    await user.save();
+
+    // Reply
+    bot.sendMessage(
+      chatId,
+      reply + `\n\n🪙 Requests left: ${20 - user.requests}, Tokens left: ${1000 - user.tokensUsed}`
+    );
   } catch (err) {
     console.error(err);
     bot.sendMessage(chatId, "⚠️ Error: Could not process your request.");
   }
 });
 
-  
