@@ -121,9 +121,22 @@ bot.onText(/\/about/, (msg) => {
 - Node.js`);
 });
   
-bot.onText(/\/clearchat/, (msg) => {
-    bot.sendMessage(msg.chat.id, "🧹 Your chat history has been cleared. Start fresh anytime!");
+bot.onText(/\/clearchat/, async (msg) => {
+  const chatId = msg.chat.id;
+
+  let user = await User.findOne({ chatId });
+  if (!user) {
+    bot.sendMessage(chatId, "⚠️ No chat history found.");
+    return;
+  }
+
+  // ✅ Clear all saved messages
+  user.messages = [];
+  await user.save();
+
+  bot.sendMessage(chatId, "🧹 Your chat history has been cleared.");
 });
+
 
 bot.onText(/\/terms/, (msg) => {
     const chatId = msg.chat.id;
@@ -384,6 +397,11 @@ bot.on("message", async (msg) => {
     // Save conversation in MongoDB
     user.messages.push({ role: "user", text });
     user.messages.push({ role: "bot", text: reply });
+
+    //limit number of chat saved
+    if (user.messages.length > 50) {
+      user.messages = user.messages.slice(-50);
+    }
 
     // Update usage
     user.requests += 1;
