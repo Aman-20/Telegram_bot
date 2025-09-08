@@ -185,16 +185,19 @@ bot.onText(/\/account/, async (msg) => {
     user = new User({
       chatId,
       requests: 0,
-      tokensUsed: 0,
       lastReset: new Date(),
+      usage: {tokensUsed: 0, resetDate: new Date()},
       messages: [],
     });
     await user.save();
   }
 
   const remainingRequests = 20 - user.requests;
-  const remainingTokens = 1000 - user.tokensUsed;
+  const usedTokens = user.usage?.tokensUsed || 0;
+  const remainingTokens = 1000 - usedTokens;
   const lang = userLanguages[chatId] || "en";
+
+
   const resetTime = new Date();
   resetTime.setHours(24, 0, 0, 0); // midnight reset
 
@@ -207,7 +210,7 @@ bot.onText(/\/account/, async (msg) => {
 - Requests remaining: ${remainingRequests}
 - Daily request limit: 20
 
-- Tokens used today: ${user.tokensUsed}
+- Tokens used today: ${usedTokens}
 - Tokens remaining: ${remainingTokens}
 - Daily token limit: 1000
 - Max tokens per reply: 100
@@ -397,7 +400,7 @@ bot.on("message", async (msg) => {
     // Reply
     bot.sendMessage(
       chatId,
-      reply + `\n\n🪙 Requests left: ${20 - user.requests}, Tokens left: ${1000 - user.tokensUsed}`
+      reply + `\n\n🪙 Requests left: ${20 - user.requests}, Tokens left: ${1000 - usedTokens}`
     );
   } catch (err) {
     console.error(err);
