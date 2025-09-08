@@ -9,7 +9,7 @@ import path from 'path';
 dotenv.config();
 const PORT = process.env.PORT || 3000;
 
-mongoose.connect(process.env.MONGODB_CONNECT, { dbName: "Telegram", useNewUrlParser: true, useUnifiedTopology: true}).then((req, res) => {
+mongoose.connect(process.env.MONGODB_CONNECT, { dbName: "Telegram"}).then((req, res) => {
   console.log("MongoDb is Connected....");
 });
 
