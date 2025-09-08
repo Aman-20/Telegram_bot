@@ -312,22 +312,21 @@ bot.on("message", async (msg) => {
     user = new User({
       chatId,
       requests: 0,
+      lastReset: new Date(),
+      usage: { tokensUsed: 0, resetDate: new Date() },
       messages: [],
-      usage: {tokensUsed: 0, resetDate:new Date()},
     });
     await user.save();
   }
 
-  // Reset limits daily
+  // Reset request limits daily
   const today = new Date().toDateString();
   if (user.lastReset.toDateString() !== today) {
     user.requests = 0;
-    //user.tokensUsed = 0;
     user.lastReset = new Date();
-    //user.messages = []; // clear memory daily if you want
   }
 
-  // --- Reset token usage daily ---
+  // Reset token usage daily
   if (user.usage.resetDate.toDateString() !== today) {
     user.usage.tokensUsed = 0;
     user.usage.resetDate = new Date();
@@ -335,10 +334,7 @@ bot.on("message", async (msg) => {
 
   // Check request limit (20/day)
   if (user.requests >= 20) {
-    bot.sendMessage(
-      chatId,
-      `⚠️ You’ve reached your daily request limit (20). Try again tomorrow.`
-    );
+    bot.sendMessage(chatId, `⚠️ You’ve reached your daily request limit (20). Try again tomorrow.`);
     return;
   }
 
@@ -346,11 +342,8 @@ bot.on("message", async (msg) => {
   const inputTokens = Math.ceil(text.split(/\s+/).length * 1.3);
 
   // Check token limit (1000/day)
-  if (user.tokensUsed + inputTokens >= 1000) {
-    bot.sendMessage(
-      chatId,
-      `⚠️ You’ve reached your daily token limit (1000). Try again tomorrow.`
-    );
+  if (user.usage.tokensUsed + inputTokens >= 1000) {
+    bot.sendMessage(chatId, `⚠️ You’ve reached your daily token limit (1000). Try again tomorrow.`);
     return;
   }
 
@@ -369,42 +362,43 @@ bot.on("message", async (msg) => {
     // Ask Gemini with output limit
     const result = await model.generateContent({
       contents: [
-        { role: "user", parts: [{ text: `Conversation so far:\n${history}\n\nUser: ${text}` }] },
+        {
+          role: "user",
+          parts: [{ text: `Answer in ${LANGUAGES[lang]} (${lang})\n\nConversation so far:\n${history}\n\nUser: ${text}` }],
+        },
       ],
-      generationConfig: { maxOutputTokens: 100 }, // limit 100 per reply
+      generationConfig: { maxOutputTokens: 100 }, // cap at 100 tokens
     });
 
-    const reply = result.response.text();
+    const reply = result?.response?.text() || "⚠️ No response from Gemini.";
 
     // Estimate output tokens
     const outputTokens = Math.ceil(reply.split(/\s+/).length * 1.3);
 
-    // Check again after output
-    if (user.tokensUsed + inputTokens + outputTokens > 1000) {
-      bot.sendMessage(
-        chatId,
-        "⚠️ This reply would exceed your daily token limit (1000). Try again tomorrow."
-      );
+    // Final check for token limit
+    if (user.usage.tokensUsed + inputTokens + outputTokens > 1000) {
+      bot.sendMessage(chatId, "⚠️ This reply would exceed your daily token limit (1000). Try again tomorrow.");
       return;
     }
 
-    // Save messages in MongoDB (memory)
+    // Save conversation in MongoDB
     user.messages.push({ role: "user", text });
     user.messages.push({ role: "bot", text: reply });
 
     // Update usage
     user.requests += 1;
-    user.tokensUsed += inputTokens + outputTokens;
+    user.usage.tokensUsed += inputTokens + outputTokens;
     await user.save();
 
-    // Reply
+    // Reply with usage info
     bot.sendMessage(
       chatId,
-      reply + `\n\n🪙 Requests left: ${20 - user.requests}, Tokens left: ${1000 - usedTokens}`
+      reply + `\n\n🪙 Requests left: ${20 - user.requests}, Tokens left: ${1000 - user.usage.tokensUsed}`
     );
   } catch (err) {
-    console.error(err);
+    console.error("❌ BOT ERROR:", err);
     bot.sendMessage(chatId, "⚠️ Error: Could not process your request.");
   }
 });
+
 
