@@ -15,7 +15,7 @@ const require = createRequire(import.meta.url);
 const pdf = require("pdf-parse");
 const mammoth = require("mammoth");
 
-const ADMIN_ID = 7941060822;
+const ADMIN_ID = 5022855333;
 const FORCE_JOIN_CHANNEL = "@dnafork_support";
 
 //membership check function
