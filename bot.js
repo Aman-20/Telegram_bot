@@ -16,7 +16,7 @@ const pdf = require("pdf-parse");
 const mammoth = require("mammoth");
 
 const ADMIN_ID = 7941060822;
-const FORCE_JOIN_CHANNEL = "@bello_world";
+const FORCE_JOIN_CHANNEL = "@dnafork_support";
 
 //membership check function
 async function isUserMember(chatId) {
@@ -117,10 +117,10 @@ const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
 
 
 // --- Initialize Telegram Bot ---
-const bot = new TelegramBot(TELEGRAM_TOKEN, { polling: true });
+const bot = new TelegramBot(TELEGRAM_TOKEN);
 
 // 2️⃣ Set the webhook URL
-//bot.setWebHook(`https://telegram-bot-1-qzck.onrender.com/bot${TELEGRAM_TOKEN}`);
+bot.setWebHook(`https://telegram-bot-1-qzck.onrender.com/bot${TELEGRAM_TOKEN}`);
 
 // 3️⃣ Express route to receive updates
 app.use(express.json());
