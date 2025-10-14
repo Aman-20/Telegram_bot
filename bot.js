@@ -194,10 +194,6 @@ function checkLimit(chatId, type, limit) {
   return true;
 }
 
-
-
-
-
 // --- Commands ---
 bot.onText(/\/start/, (msg) => {
   bot.sendMessage(msg.chat.id, `👋 Hi ${msg.from.first_name}!
@@ -219,7 +215,7 @@ bot.onText(/\/help/, (msg) => {
 /setmodel - To choose from different Ai Models
 /language - Change language
 
-Command for Admin:
+🎧 Command for Admin:
 /broadcast - Any Message
 /usage - To check usage report
 
@@ -691,7 +687,8 @@ bot.on("document", async (msg) => {
 
     if (text.length > 20000) text = text.slice(0, 20000); // safety limit
 
-    const result = await model.generateContent({
+    const docModel = genAI.getGenerativeModel({ model: "gemini-2.0-flash" });
+    const result = await docModel.generateContent({
       contents: [
         { role: "user", parts: [{ text: `Summarize this document:\n\n${text}` }] }
       ],
@@ -742,7 +739,8 @@ bot.on("photo", async (msg) => {
     const fileBuffer = await downloadFile(photo.file_id);
     const base64Image = fileBuffer.toString("base64");
 
-    const result = await model.generateContent([
+    const imgModel = genAI.getGenerativeModel({ model: "gemini-2.0-flash" });
+    const result = await imgModel.generateContent([
       "Describe this image clearly.",
       { inlineData: { data: base64Image, mimeType: "image/jpeg" } }
     ]);
@@ -947,7 +945,7 @@ bot.on("message", async (msg) => {
         generationConfig: { maxOutputTokens: 100 },
       });
 
-      reply = result?.response?.text() || "⚠️ No response from Gemini.";
+      reply = result?.response?.text() || "⚠️ No response from Gemini Flash Lite. Change to another model";
     } else if (chosen.type === "gemini-2.5-pro") {
       //added limit here
       if (!checkLimit(chatId, "proTokens", 5)) {
@@ -966,7 +964,7 @@ bot.on("message", async (msg) => {
         generationConfig: { maxOutputTokens: 100 },
       });
 
-      reply = result?.response?.text() || "⚠️ No response from Gemini.";
+      reply = result?.response?.text() || "⚠️ No response from Gemini Pro. Change to another model";
     }
 
     // Later you will add:
