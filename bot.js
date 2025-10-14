@@ -161,7 +161,7 @@ bot.setMyCommands([
 
 // --- Initialize Gemini ---
 const genAI = new GoogleGenerativeAI(GEMINI_API_KEY);
-const model = genAI.getGenerativeModel({ model: "gemini-2.5-flash" });
+const model = genAI.getGenerativeModel({ model: "gemini-2.0-flash" });
 
 // Define supported languages
 const LANGUAGES = {
@@ -884,7 +884,6 @@ bot.on("message", async (msg) => {
 
     if (chosen.type === "gemini") {
       const result = await model.generateContent({
-        model: "gemini-2.5-flash",
         contents: [
           {
             role: "user",
@@ -1004,8 +1003,8 @@ bot.on("message", async (msg) => {
       reply + `\n\n🪙 Requests left: ${20 - user.requests}, Tokens left: ${1000 - user.usage.tokensUsed}`
     );
   } catch (err) {
-    console.error("❌ BOT ERROR:", err);
-    bot.sendMessage(chatId, "⚠️ Error: Could not process your request.");
+    console.error("❌ Gemini error:", err);
+    bot.sendMessage(chatId, "❌ BOT ERROR: " + (err.message || "Unknown error"));
   }
 });
 
