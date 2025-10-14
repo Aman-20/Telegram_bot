@@ -46,19 +46,19 @@ const PORT = process.env.PORT || 3000;
 
 const MODELS = {
   gemini: {
-    name: "Gemini 1.5 Flash",
+    name: "Gemini 2.5 Flash",
     key: process.env.GEMINI_API_KEY,
     type: "gemini"
   },
   gemini_flash2: {
-    name: "Gemini 1.5 Flash-2.0",
+    name: "Gemini 2.5 Flash 2",
     key: process.env.GEMINI_API_KEY,
-    type: "gemini-1.5-flash-002"
+    type: "gemini-2.5-flash"
   },
   gemini_pro: {
-    name: "Gemini 1.5 Pro",
+    name: "Gemini 2.5 Pro",
     key: process.env.GEMINI_API_KEY,
-    type: "gemini-1.5-pro"
+    type: "gemini-2.5-pro"
   },
   openai: {
     name: "GPT-4o-mini",
@@ -161,7 +161,7 @@ bot.setMyCommands([
 
 // --- Initialize Gemini ---
 const genAI = new GoogleGenerativeAI(GEMINI_API_KEY);
-const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash" });
+const model = genAI.getGenerativeModel({ model: "gemini-2.5-flash" });
 
 // Define supported languages
 const LANGUAGES = {
@@ -218,6 +218,10 @@ bot.onText(/\/help/, (msg) => {
 /search - For Web Search
 /setmodel - To choose from different Ai Models
 /language - Change language
+
+Command for Admin:
+/broadcast - Any Message
+/usage - To check usage report
 
 Additionaly you can send any documemt and photo 
 for analysis and other related questions.
@@ -930,9 +934,9 @@ bot.on("message", async (msg) => {
       });
 
       reply = response.content?.[0]?.text || "⚠ No response from Claude.";
-    } else if (chosen.type === "gemini-1.5-flash-002") {
+    } else if (chosen.type === "gemini-2.5-flash") {
       const result = await model.generateContent({
-        model: "gemini-1.5-flash-002",
+        model: "gemini-2.5-flash",
         contents: [
           {
             role: "user",
@@ -943,7 +947,7 @@ bot.on("message", async (msg) => {
       });
 
       reply = result?.response?.text() || "⚠️ No response from Gemini.";
-    } else if (chosen.type === "gemini-1.5-pro") {
+    } else if (chosen.type === "gemini-2.5-pro") {
       //added limit here
       if (!checkLimit(chatId, "proTokens", 5)) {
         bot.sendMessage(chatId, "⚠️ Gemini-Pro usage limit reached (5 messages/day).");
@@ -951,7 +955,7 @@ bot.on("message", async (msg) => {
       }
       
       const result = await model.generateContent({
-        model: "gemini-1.5-pro",
+        model: "gemini-2.5-pro",
         contents: [
           {
             role: "user",
