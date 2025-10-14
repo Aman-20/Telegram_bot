@@ -51,9 +51,9 @@ const MODELS = {
     type: "gemini"
   },
   gemini_flash2: {
-    name: "Gemini 2.5 Flash 2",
+    name: "Gemini 2.5 Flash Lite",
     key: process.env.GEMINI_API_KEY,
-    type: "gemini-2.5-flash"
+    type: "gemini-2.5-flash-lite"
   },
   gemini_pro: {
     name: "Gemini 2.5 Pro",
@@ -849,6 +849,7 @@ bot.on("message", async (msg) => {
   }
 
   // Estimate input tokens
+  if (typeof text !== "string") return;
   const inputTokens = Math.ceil(text.split(/\s+/).length * 1.3);
 
   // Check token limit (1000/day)
@@ -883,6 +884,7 @@ bot.on("message", async (msg) => {
 
     if (chosen.type === "gemini") {
       const result = await model.generateContent({
+        model: "gemini-2.5-flash",
         contents: [
           {
             role: "user",
@@ -934,9 +936,9 @@ bot.on("message", async (msg) => {
       });
 
       reply = response.content?.[0]?.text || "⚠ No response from Claude.";
-    } else if (chosen.type === "gemini-2.5-flash") {
+    } else if (chosen.type === "gemini-2.5-flash-lite") {
       const result = await model.generateContent({
-        model: "gemini-2.5-flash",
+        model: "gemini-2.5-flash-lite",
         contents: [
           {
             role: "user",
