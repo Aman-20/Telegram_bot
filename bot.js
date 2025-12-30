@@ -4,7 +4,6 @@ import TelegramBot from "node-telegram-bot-api";
 import dotenv from "dotenv";
 import { GoogleGenerativeAI } from "@google/generative-ai";
 import mongoose from 'mongoose';
-import path from 'path';
 import fetch from "node-fetch";
 import OpenAI from "openai";
 import Anthropic from "@anthropic-ai/sdk";
@@ -22,13 +21,87 @@ const FORCE_JOIN_CHANNEL = "@dnafork_support";
 async function isUserMember(chatId) {
   try {
     const member = await bot.getChatMember(FORCE_JOIN_CHANNEL, chatId);
-    const status = member.status; 
+    const status = member.status;
     // "creator", "administrator", "member" are valid
     return ["creator", "administrator", "member"].includes(status);
   } catch (err) {
     console.warn("⚠️ Membership check failed:", err.message);
     return false; // treat errors as not a member
   }
+}
+
+// --- Approved users (DEV MODE) ---
+const approvedUsers = new Map([
+  [ADMIN_ID, Infinity] // admin never expires
+]);
+
+// chatId -> last request timestamp (ms)
+const rateLimitMap = new Map();
+const RATE_LIMIT_MS = 10 * 1000; // 10 seconds
+
+//limit on message 
+function guardRateLimit(msg) {
+  // ❌ Skip commands
+  if (msg.text && msg.text.startsWith("/")) {
+    return true;
+  }
+
+  // ❌ Skip media here (handled elsewhere)
+  if (msg.photo || msg.document) {
+    return true;
+  }
+
+  const chatId = msg.chat.id;
+  const now = Date.now();
+  const last = rateLimitMap.get(chatId) || 0;
+
+  const remaining = RATE_LIMIT_MS - (now - last);
+
+  if (remaining > 0) {
+    const seconds = Math.ceil(remaining / 1000);
+    bot.sendMessage(chatId, `⏳ Please wait ${seconds}s before sending another request.`);
+    return false;
+  }
+
+  rateLimitMap.set(chatId, now);
+  return true;
+}
+
+//limit on media 
+function guardRateLimitMedia(msg) {
+  const chatId = msg.chat.id;
+  const now = Date.now();
+  const last = rateLimitMap.get(chatId) || 0;
+
+  const remaining = RATE_LIMIT_MS - (now - last);
+
+  if (remaining > 0) {
+    const seconds = Math.ceil(remaining / 1000);
+    bot.sendMessage(chatId, `⏳ Please wait ${seconds}s before sending another request.`);
+    return false;
+  }
+
+  rateLimitMap.set(chatId, now);
+  return true;
+}
+
+//limit on search and imagine
+const commandRateLimit = new Map();
+const COMMAND_LIMIT_MS = 60 * 1000; // 60 seconds
+function guardCommandRateLimit(msg, commandName) {
+  const chatId = msg.chat.id;
+  const key = `${chatId}:${commandName}`;
+  const now = Date.now();
+  const last = commandRateLimit.get(key) || 0;
+
+  if (now - last < COMMAND_LIMIT_MS) {
+    const wait = Math.ceil((COMMAND_LIMIT_MS - (now - last)) / 1000);
+    bot.sendMessage(chatId, `⏳ Please wait ${wait}s before using /${commandName} again.`);
+    return false;
+  }
+
+  commandRateLimit.set(key, now);
+  return true;
 }
 
 
@@ -46,19 +119,34 @@ const PORT = process.env.PORT || 3000;
 
 const MODELS = {
   gemini: {
+    name: "Best Model: Auto ",
+    key: process.env.GEMINI_API_KEY,
+    provider: "gemini",
+    model: "gemma-3-4b-it",
+  },
+  gemini_flash1: {
     name: "Gemini 2.5 Flash",
     key: process.env.GEMINI_API_KEY,
-    type: "gemini"
+    provider: "gemini",
+    model: "gemma-3-27b-it",
   },
   gemini_flash2: {
     name: "Gemini 2.5 Flash Lite",
     key: process.env.GEMINI_API_KEY,
-    type: "gemini-2.5-flash-lite"
+    provider: "gemini",
+    model: "gemma-3-12b-it",
+  },
+  gemini_flash3: {
+    name: "Gemini 3 Flash",
+    key: process.env.GEMINI_API_KEY,
+    provider: "gemini",
+    model: "gemini-2.5-flash-lite",
   },
   gemini_pro: {
-    name: "Gemini 2.5 Pro",
+    name: "Gemini 3 Pro",
     key: process.env.GEMINI_API_KEY,
-    type: "gemini-2.5-pro"
+    provider: "gemini",
+    model: "gemini-2.5-flash",
   },
   openai: {
     name: "GPT-4o-mini",
@@ -138,7 +226,7 @@ const mainKeyboard = {
     keyboard: [
       ["🔍 Search", "🎨 Imagine"],
       ["🤖 Set Model", "📄 Document Analysis"],
-      [{ text: '/help' }, { text: '/account' }]
+      [{ text: '/status' }, { text: '/account' }]
     ],
     resize_keyboard: true,
     one_time_keyboard: false
@@ -161,7 +249,6 @@ bot.setMyCommands([
 
 // --- Initialize Gemini ---
 const genAI = new GoogleGenerativeAI(GEMINI_API_KEY);
-const model = genAI.getGenerativeModel({ model: "gemini-2.0-flash" });
 
 // Define supported languages
 const LANGUAGES = {
@@ -177,7 +264,7 @@ const LANGUAGES = {
 
 
 //usage limit 
-const userUsage = {}; 
+const userUsage = {};
 // Format: userUsage[chatId] = { date: "YYYY-MM-DD", search: 0, imagine: 0, doc: 0, img: 0, proTokens: 0 }
 function getToday() {
   return new Date().toISOString().slice(0, 10);
@@ -198,13 +285,14 @@ function checkLimit(chatId, type, limit) {
 bot.onText(/\/start/, (msg) => {
   bot.sendMessage(msg.chat.id, `👋 Hi ${msg.from.first_name}!
 I am your Private AI assistant.
-Type any question and I’ll try to answer.`, mainKeyboard
+Type any question and I'll try to answer`, mainKeyboard
   );
 });
 
 bot.onText(/\/help/, (msg) => {
   bot.sendMessage(msg.chat.id, `📌 Available commands:
 /start - Start the bot
+/status - Do you have access?
 /help - Show help
 /about - About this bot
 /clearchat - Clear chat history
@@ -218,6 +306,9 @@ bot.onText(/\/help/, (msg) => {
 🎧 Command for Admin:
 /broadcast - Any Message
 /usage - To check usage report
+/approve - Give user approval
+/remove - Remove user approval
+/users - List of approved users
 
 Additionaly you can send any documemt and photo 
 for analysis and other related questions.
@@ -244,14 +335,17 @@ bot.onText(/\/clearchat/, async (msg) => {
       {
         reply_markup: {
           inline_keyboard: [
-            [{ text: "📢 Join Channel", url: `https://t.me/${FORCE_JOIN_CHANNEL.replace("@","")}` }]
+            [{ text: "📢 Join Channel", url: `https://t.me/${FORCE_JOIN_CHANNEL.replace("@", "")}` }]
           ]
         }
       }
     );
     return;
   }
-  
+
+  if (!approvedUsers.has(msg.chat.id)) return;
+
+
 
   let user = await User.findOne({ chatId });
   if (!user) {
@@ -267,8 +361,22 @@ bot.onText(/\/clearchat/, async (msg) => {
 });
 
 
-bot.onText(/\/terms/, (msg) => {
+bot.onText(/\/terms/, async (msg) => {
   const chatId = msg.chat.id;
+
+  if (!(await isUserMember(chatId))) {
+    bot.sendMessage(chatId,
+      `⚠️ You must join our channel first to use this bot.`,
+      {
+        reply_markup: {
+          inline_keyboard: [
+            [{ text: "📢 Join Channel", url: `https://t.me/${FORCE_JOIN_CHANNEL.replace("@", "")}` }]
+          ]
+        }
+      }
+    );
+    return;
+  }
 
   const terms = `
   📜 *Terms of Service*
@@ -291,31 +399,47 @@ bot.onText(/\/terms/, (msg) => {
       ]
     }
   });
+
 });
 
 
-const DEFAULT_LIMIT = 20; // requests per day
-const userData = {}; // { chatId: { requests: 0, limit: 20, lastReset: Date } }
-
-function resetUserLimits() {
-  const now = new Date();
-
-  for (const chatId in userData) {
-    const user = userData[chatId];
-    const lastReset = user.lastReset || new Date(0);
-
-    // If last reset was before today, reset requests
-    if (lastReset.toDateString() !== now.toDateString()) {
-      user.requests = 0;
-      user.lastReset = now;
-    }
+bot.onText(/\/approve (\d+)/, (msg, match) => {
+  if (msg.chat.id !== ADMIN_ID) {
+    return bot.sendMessage(msg.chat.id, "⚠️ Unauthorized");
   }
+
+  const userId = Number(match[1]);
+  const expiresAt = Date.now() + 24 * 60 * 60 * 1000; // 24hours
+
+  approvedUsers.set(userId, expiresAt);
+
+  bot.sendMessage(
+    ADMIN_ID,
+    `✅ User ${userId} approved for 24 hours.`
+  );
+});
+
+
+function guardAccess(msg) {
+  const chatId = msg.chat.id;
+  const expiry = approvedUsers.get(chatId);
+
+  if (!expiry) {
+    bot.sendMessage(chatId, "🚧 This bot is private Contact: @dnafork_support to get access");
+    return false;
+  }
+
+  if (Date.now() > expiry) {
+    approvedUsers.delete(chatId);
+    bot.sendMessage(
+      chatId,
+      "⏳ Your access has expired. Please request access again."
+    );
+    return false;
+  }
+
+  return true;
 }
-
-// Run reset every hour (or any interval)
-setInterval(resetUserLimits, 60 * 60 * 1000); // every 1 hour
-
-
 
 // --- My Account ---
 bot.onText(/\/account/, async (msg) => {
@@ -328,14 +452,16 @@ bot.onText(/\/account/, async (msg) => {
       {
         reply_markup: {
           inline_keyboard: [
-            [{ text: "📢 Join Channel", url: `https://t.me/${FORCE_JOIN_CHANNEL.replace("@","")}` }]
+            [{ text: "📢 Join Channel", url: `https://t.me/${FORCE_JOIN_CHANNEL.replace("@", "")}` }]
           ]
         }
       }
     );
     return;
   }
-  
+
+  if (!approvedUsers.has(msg.chat.id)) return;
+
 
   // Fetch user from DB
   let user = await User.findOne({ chatId });
@@ -443,48 +569,6 @@ bot.on("callback_query", (query) => {
   }
 });
 
-
-async function saveMessage(chatId, role, text) {
-  let user = await User.findOne({ chatId });
-  if (!user) {
-    user = new User({ chatId });
-  }
-
-  user.messages.push({ role, text });
-
-  // keep only last 10 messages
-  if (user.messages.length > 10) {
-    user.messages = user.messages.slice(-10);
-  }
-
-  await user.save();
-}
-
-async function checkAndUpdateUsage(chatId, tokensUsedNow) {
-  let user = await User.findOne({ chatId });
-  if (!user) {
-    user = new User({ chatId });
-  }
-
-  const today = new Date();
-  const resetDate = new Date(user.usage.resetDate);
-
-  // reset daily
-  if (today.toDateString() !== resetDate.toDateString()) {
-    user.usage.tokensUsed = 0;
-    user.usage.resetDate = today;
-  }
-
-  if (user.usage.tokensUsed + tokensUsedNow > 1000) {
-    return { allowed: false, remaining: 0 };
-  }
-
-  user.usage.tokensUsed += tokensUsedNow;
-  await user.save();
-
-  return { allowed: true, remaining: 1000 - user.usage.tokensUsed };
-}
-
 //search the web
 bot.onText(/\/search (.+)/, async (msg, match) => {
   const chatId = msg.chat.id;
@@ -495,14 +579,18 @@ bot.onText(/\/search (.+)/, async (msg, match) => {
       {
         reply_markup: {
           inline_keyboard: [
-            [{ text: "📢 Join Channel", url: `https://t.me/${FORCE_JOIN_CHANNEL.replace("@","")}` }]
+            [{ text: "📢 Join Channel", url: `https://t.me/${FORCE_JOIN_CHANNEL.replace("@", "")}` }]
           ]
         }
       }
     );
     return;
   }
-  
+
+  if (!approvedUsers.has(msg.chat.id)) return;
+  if (!guardCommandRateLimit(msg, "search")) return;
+
+
   const query = match[1];
   bot.sendChatAction(chatId, "typing");
 
@@ -511,7 +599,7 @@ bot.onText(/\/search (.+)/, async (msg, match) => {
     bot.sendMessage(chatId, "⚠️ Daily search limit reached (10). Try again tomorrow.");
     return;
   }
-  
+
 
   try {
     const res = await fetch("https://google.serper.dev/search", {
@@ -551,7 +639,7 @@ bot.onText(/\/search (.+)/, async (msg, match) => {
 
 
 //select model
-bot.onText(/\/setmodel/, async(msg) => {
+bot.onText(/\/setmodel/, async (msg) => {
   const chatId = msg.chat.id;
 
   //force join
@@ -561,14 +649,16 @@ bot.onText(/\/setmodel/, async(msg) => {
       {
         reply_markup: {
           inline_keyboard: [
-            [{ text: "📢 Join Channel", url: `https://t.me/${FORCE_JOIN_CHANNEL.replace("@","")}` }]
+            [{ text: "📢 Join Channel", url: `https://t.me/${FORCE_JOIN_CHANNEL.replace("@", "")}` }]
           ]
         }
       }
     );
     return;
   }
-  
+
+  if (!approvedUsers.has(msg.chat.id)) return;
+
 
   // Build buttons dynamically only for models with keys
   const buttons = Object.entries(MODELS)
@@ -607,6 +697,25 @@ bot.on("callback_query", async (query) => {
 //imagine 
 bot.onText(/\/imagine (.+)/, async (msg, match) => {
   const chatId = msg.chat.id;
+
+  //force join
+  if (!(await isUserMember(chatId))) {
+    bot.sendMessage(chatId,
+      `⚠️ You must join our channel first to use this bot.`,
+      {
+        reply_markup: {
+          inline_keyboard: [
+            [{ text: "📢 Join Channel", url: `https://t.me/${FORCE_JOIN_CHANNEL.replace("@", "")}` }]
+          ]
+        }
+      }
+    );
+    return;
+  }
+
+  if (!approvedUsers.has(msg.chat.id)) return;
+  if (!guardCommandRateLimit(msg, "imagine")) return;
+
   const prompt = match[1];
 
   bot.sendChatAction(chatId, "upload_photo");
@@ -616,7 +725,7 @@ bot.onText(/\/imagine (.+)/, async (msg, match) => {
     bot.sendMessage(chatId, "⚠️ Daily image generation limit reached (5). Try again tomorrow.");
     return;
   }
-  
+
 
   try {
     const imageUrl = `https://image.pollinations.ai/prompt/${encodeURIComponent(prompt)}`;
@@ -640,14 +749,18 @@ bot.on("document", async (msg) => {
       {
         reply_markup: {
           inline_keyboard: [
-            [{ text: "📢 Join Channel", url: `https://t.me/${FORCE_JOIN_CHANNEL.replace("@","")}` }]
+            [{ text: "📢 Join Channel", url: `https://t.me/${FORCE_JOIN_CHANNEL.replace("@", "")}` }]
           ]
         }
       }
     );
     return;
   }
-  
+
+  if (!approvedUsers.has(msg.chat.id)) return;
+  if (!guardRateLimitMedia(msg)) return;
+
+
   const fileName = msg.document.file_name.toLowerCase();
 
   bot.sendChatAction(chatId, "typing");
@@ -657,7 +770,7 @@ bot.on("document", async (msg) => {
     bot.sendMessage(chatId, "⚠️ Daily document analysis limit reached (3). Try again tomorrow.");
     return;
   }
-  
+
 
   try {
     const fileBuffer = await downloadFile(msg.document.file_id);
@@ -687,7 +800,7 @@ bot.on("document", async (msg) => {
 
     if (text.length > 20000) text = text.slice(0, 20000); // safety limit
 
-    const docModel = genAI.getGenerativeModel({ model: "gemini-2.0-flash" });
+    const docModel = genAI.getGenerativeModel({ model: "gemini-2.5-flash-lite" });
     const result = await docModel.generateContent({
       contents: [
         { role: "user", parts: [{ text: `Summarize this document:\n\n${text}` }] }
@@ -716,14 +829,19 @@ bot.on("photo", async (msg) => {
       {
         reply_markup: {
           inline_keyboard: [
-            [{ text: "📢 Join Channel", url: `https://t.me/${FORCE_JOIN_CHANNEL.replace("@","")}` }]
+            [{ text: "📢 Join Channel", url: `https://t.me/${FORCE_JOIN_CHANNEL.replace("@", "")}` }]
           ]
         }
       }
     );
     return;
   }
-  
+
+  if (!approvedUsers.has(msg.chat.id)) return;
+  if (!guardRateLimitMedia(msg)) return;
+
+
+
   const photo = msg.photo[msg.photo.length - 1]; // largest size
 
   bot.sendChatAction(chatId, "typing");
@@ -733,13 +851,13 @@ bot.on("photo", async (msg) => {
     bot.sendMessage(chatId, "⚠️ Daily image analysis limit reached (3). Try again tomorrow.");
     return;
   }
-  
+
 
   try {
     const fileBuffer = await downloadFile(photo.file_id);
     const base64Image = fileBuffer.toString("base64");
 
-    const imgModel = genAI.getGenerativeModel({ model: "gemini-2.0-flash" });
+    const imgModel = genAI.getGenerativeModel({ model: "gemini-2.5-flash-lite" });
     const result = await imgModel.generateContent([
       "Describe this image clearly.",
       { inlineData: { data: base64Image, mimeType: "image/jpeg" } }
@@ -766,26 +884,27 @@ bot.on("message", async (msg) => {
       {
         reply_markup: {
           inline_keyboard: [
-            [{ text: "📢 Join Channel", url: `https://t.me/${FORCE_JOIN_CHANNEL.replace("@","")}` }]
+            [{ text: "📢 Join Channel", url: `https://t.me/${FORCE_JOIN_CHANNEL.replace("@", "")}` }]
           ]
         }
       }
     );
     return;
   }
-  
+
+  if (!guardAccess(msg)) return;
+  if (!guardRateLimit(msg)) return;
+
   const text = msg.text;
 
   if (text && text.startsWith("/")) return; // ignore commands & empty
 
-  //if is not text
-  if (msg.video || msg.audio || msg.voice || msg.sticker || msg.video_note || msg.animation || msg.contact || msg.location || msg.poll || msg.venue || msg.poll ||  msg.dice || msg.game || msg.invoice || msg.successful_payment || msg.pinned_message
-  ) {
-    bot.sendMessage(chatId, "⚠️ Only text, images, and documents are allowed.");
+  // Allow text messages here; ignore photo & document (handled elsewhere)
+  if (!msg.text) {
     return;
   }
 
-  // Block pure link messages (optional)
+  // Block pure link messages
   if (msg.text && /^https?:\/\//i.test(msg.text.trim())) {
     bot.sendMessage(chatId, "⚠️ Links are not allowed. Please send text, document, or image.");
     return;
@@ -880,8 +999,23 @@ bot.on("message", async (msg) => {
 
     let reply = "";
 
-    if (chosen.type === "gemini") {
-      const result = await model.generateContent({
+    if (chosen.provider === "gemini") {
+
+      // Optional: keep Pro limit
+      if (chosen.model === "gemini-2.5-flash") {
+        if (!checkLimit(chatId, "proTokens", 5)) {
+          bot.sendMessage(chatId, "⚠️ Pro model daily limit reached");
+          return;
+        }
+      }
+
+      //console.log("ACTIVE MODEL:", chosen.model);
+
+      const dynamicModel = genAI.getGenerativeModel({
+        model: chosen.model || "gemma-3-1b-it"
+      });
+
+      const result = await dynamicModel.generateContent({
         contents: [
           {
             role: "user",
@@ -933,43 +1067,7 @@ bot.on("message", async (msg) => {
       });
 
       reply = response.content?.[0]?.text || "⚠ No response from Claude.";
-    } else if (chosen.type === "gemini-2.5-flash-lite") {
-      const result = await model.generateContent({
-        model: "gemini-2.5-flash-lite",
-        contents: [
-          {
-            role: "user",
-            parts: [{ text: `Answer in ${LANGUAGES[lang]} (${lang})\n\nConversation so far:\n${history}\n\nUser: ${text}` }],
-          },
-        ],
-        generationConfig: { maxOutputTokens: 100 },
-      });
-
-      reply = result?.response?.text() || "⚠️ No response from Gemini Flash Lite. Change to another model";
-    } else if (chosen.type === "gemini-2.5-pro") {
-      //added limit here
-      if (!checkLimit(chatId, "proTokens", 5)) {
-        bot.sendMessage(chatId, "⚠️ Gemini-Pro usage limit reached (5 messages/day).");
-        return;
-      }
-      
-      const result = await model.generateContent({
-        model: "gemini-2.5-pro",
-        contents: [
-          {
-            role: "user",
-            parts: [{ text: `Answer in ${LANGUAGES[lang]} (${lang})\n\nConversation so far:\n${history}\n\nUser: ${text}` }],
-          },
-        ],
-        generationConfig: { maxOutputTokens: 100 },
-      });
-
-      reply = result?.response?.text() || "⚠️ No response from Gemini Pro. Change to another model";
     }
-
-    // Later you will add:
-    // else if (chosen.type === "openai") { ... }
-    // else if (chosen.type === "claude") { ... }
 
 
     // Estimate output tokens
@@ -1065,5 +1163,64 @@ Requests: ${u.requests}, Tokens: ${u.usage?.tokensUsed || 0}
   } catch (err) {
     console.error("❌ Usage report error:", err);
     bot.sendMessage(ADMIN_ID, "⚠️ Failed to generate usage report.");
+  }
+});
+
+
+//see users
+bot.onText(/\/users/, (msg) => {
+  if (msg.chat.id !== ADMIN_ID) {
+    return bot.sendMessage(msg.chat.id, "⚠️ Unauthorized");
+  }
+
+  if (approvedUsers.size === 0) {
+    return bot.sendMessage(ADMIN_ID, "📭 No approved users.");
+  }
+
+  let text = "👥 *Approved Users*\n━━━━━━━━━━━━━\n";
+  let i = 1;
+
+  for (const [id, expiry] of approvedUsers.entries()) {
+    const remaining =
+      expiry === Infinity
+        ? "∞"
+        : Math.max(0, Math.ceil((expiry - Date.now()) / (60 * 60 * 1000))) + "h";
+
+    text += `${i}. \`${id}\` — ⏳ ${remaining}\n`;
+    i++;
+  }
+
+  bot.sendMessage(ADMIN_ID, text, { parse_mode: "Markdown" });
+});
+
+
+//remove users
+bot.onText(/\/remove (\d+)/, (msg, match) => {
+  if (msg.chat.id !== ADMIN_ID) {
+    return bot.sendMessage(msg.chat.id, "⚠️ Unauthorized");
+  }
+
+  const userId = Number(match[1]);
+
+  if (userId === ADMIN_ID) {
+    return bot.sendMessage(ADMIN_ID, "❌ You cannot remove yourself.");
+  }
+
+  if (!approvedUsers.has(userId)) {
+    return bot.sendMessage(ADMIN_ID, "⚠️ User is not approved.");
+  }
+
+  approvedUsers.delete(userId);
+  bot.sendMessage(ADMIN_ID, `❌ User ${userId} removed from approved list.`);
+});
+
+//user status
+bot.onText(/\/status/, (msg) => {
+  const chatId = msg.chat.id;
+
+  if (approvedUsers.has(chatId)) {
+    bot.sendMessage(chatId, "✅ You have access to this bot. Contact: @dnafork_support for any problem");
+  } else {
+    bot.sendMessage(chatId, "🚧 You do not have access.");
   }
 });
