@@ -14,8 +14,25 @@ const require = createRequire(import.meta.url);
 const pdf = require("pdf-parse");
 const mammoth = require("mammoth");
 
-const ADMIN_ID = 5022855333;
-const FORCE_JOIN_CHANNEL = "@dnafork_support";
+dotenv.config();
+
+// 🔒 GLOBAL SAFETY NETS
+process.on("unhandledRejection", (err) => {
+  console.error("Unhandled rejection:", err);
+});
+
+process.on("uncaughtException", (err) => {
+  console.error("Uncaught exception:", err);
+});
+
+const PORT = process.env.PORT || 3000;
+
+// 🔥 make bot public(true) or private(false) 
+let PUBLIC_MODE = false;
+
+
+const ADMIN_ID = Number(process.env.ADMIN_ID);
+const FORCE_JOIN_CHANNEL = process.env.FORCE_JOIN_CHANNEL || "";
 
 //membership check function
 async function isUserMember(chatId) {
@@ -114,9 +131,6 @@ async function downloadFile(fileId) {
   return buf;
 }
 
-dotenv.config();
-const PORT = process.env.PORT || 3000;
-
 const MODELS = {
   gemini: {
     name: "Best Model: Auto ",
@@ -202,13 +216,14 @@ app.get("/terms", (req, res) => res.render("terms"));
 // --- Load API keys from .env ---
 const TELEGRAM_TOKEN = process.env.TELEGRAM_TOKEN;
 const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
+const RENDER_URL = process.env.RENDER_URL;
 
 
 // --- Initialize Telegram Bot ---
 const bot = new TelegramBot(TELEGRAM_TOKEN);
 
 // 2️⃣ Set the webhook URL
-bot.setWebHook(`https://telegram-bot-1-qzck.onrender.com/bot${TELEGRAM_TOKEN}`);
+bot.setWebHook(`${RENDER_URL}/bot${TELEGRAM_TOKEN}`);
 
 // 3️⃣ Express route to receive updates
 app.use(express.json());
@@ -309,6 +324,9 @@ bot.onText(/\/help/, (msg) => {
 /approve - Give user approval
 /remove - Remove user approval
 /users - List of approved users
+/mode - Check private or public
+/private - set bot to private mode 
+/public - set bot to public mode 
 
 Additionaly you can send any documemt and photo 
 for analysis and other related questions.
@@ -343,7 +361,7 @@ bot.onText(/\/clearchat/, async (msg) => {
     return;
   }
 
-  if (!approvedUsers.has(msg.chat.id)) return;
+  if (!PUBLIC_MODE && !approvedUsers.has(msg.chat.id)) return;
 
 
 
@@ -421,6 +439,9 @@ bot.onText(/\/approve (\d+)/, (msg, match) => {
 
 
 function guardAccess(msg) {
+  // 🔓 Public mode: allow everyone
+  if (PUBLIC_MODE) return true;
+
   const chatId = msg.chat.id;
   const expiry = approvedUsers.get(chatId);
 
@@ -460,7 +481,7 @@ bot.onText(/\/account/, async (msg) => {
     return;
   }
 
-  if (!approvedUsers.has(msg.chat.id)) return;
+  if (!PUBLIC_MODE && !approvedUsers.has(msg.chat.id)) return;
 
 
   // Fetch user from DB
@@ -529,7 +550,7 @@ bot.onText(/\/account/, async (msg) => {
 🎨 Image Generations: ${usage.imagine}/${limits.imagine}
 📄 Document Analyses: ${usage.doc}/${limits.doc}
 🖼️ Image Analyses: ${usage.img}/${limits.img}
-🤖 Gemini-Pro Requests: ${usage.proTokens}/${limits.proTokens}
+🤖 Pro-Model Requests: ${usage.proTokens}/${limits.proTokens}
     `,
     { parse_mode: "Markdown" }
   );
@@ -587,7 +608,7 @@ bot.onText(/\/search (.+)/, async (msg, match) => {
     return;
   }
 
-  if (!approvedUsers.has(msg.chat.id)) return;
+  if (!PUBLIC_MODE && !approvedUsers.has(msg.chat.id)) return;
   if (!guardCommandRateLimit(msg, "search")) return;
 
 
@@ -657,7 +678,7 @@ bot.onText(/\/setmodel/, async (msg) => {
     return;
   }
 
-  if (!approvedUsers.has(msg.chat.id)) return;
+  if (!PUBLIC_MODE && !approvedUsers.has(msg.chat.id)) return;
 
 
   // Build buttons dynamically only for models with keys
@@ -713,7 +734,7 @@ bot.onText(/\/imagine (.+)/, async (msg, match) => {
     return;
   }
 
-  if (!approvedUsers.has(msg.chat.id)) return;
+  if (!PUBLIC_MODE && !approvedUsers.has(msg.chat.id)) return;
   if (!guardCommandRateLimit(msg, "imagine")) return;
 
   const prompt = match[1];
@@ -757,7 +778,7 @@ bot.on("document", async (msg) => {
     return;
   }
 
-  if (!approvedUsers.has(msg.chat.id)) return;
+  if (!PUBLIC_MODE && !approvedUsers.has(msg.chat.id)) return;
   if (!guardRateLimitMedia(msg)) return;
 
 
@@ -837,7 +858,7 @@ bot.on("photo", async (msg) => {
     return;
   }
 
-  if (!approvedUsers.has(msg.chat.id)) return;
+  if (!PUBLIC_MODE && !approvedUsers.has(msg.chat.id)) return;
   if (!guardRateLimitMedia(msg)) return;
 
 
@@ -1215,12 +1236,53 @@ bot.onText(/\/remove (\d+)/, (msg, match) => {
 });
 
 //user status
-bot.onText(/\/status/, (msg) => {
+bot.onText(/\/status/, (msg) => {                      
   const chatId = msg.chat.id;
 
+  if (PUBLIC_MODE) {
+    bot.sendMessage(chatId, "🔓 Bot is currently in PUBLIC MODE");
+  }
+  
   if (approvedUsers.has(chatId)) {
     bot.sendMessage(chatId, "✅ You have access to this bot. Contact: @dnafork_support for any problem");
   } else {
     bot.sendMessage(chatId, "🚧 You do not have access.");
   }
+});
+
+
+//set bot public
+bot.onText(/\/public/, (msg) => {
+  if (msg.chat.id !== ADMIN_ID) {
+    bot.sendMessage(msg.chat.id, "⛔ Admin only command");
+    return;
+  }
+
+  PUBLIC_MODE = true;
+  bot.sendMessage(msg.chat.id, "🔓 Bot is now in PUBLIC mode");
+});
+
+
+//set bot private 
+bot.onText(/\/private/, (msg) => {
+  if (msg.chat.id !== ADMIN_ID) {
+    bot.sendMessage(msg.chat.id, "⛔ Admin only command");
+    return;
+  }
+
+  PUBLIC_MODE = false;
+  bot.sendMessage(msg.chat.id, "🔒 Bot is now in PRIVATE mode");
+});
+
+
+//set mode private or public
+bot.onText(/\/mode/, (msg) => {
+  if (msg.chat.id !== ADMIN_ID) return;
+
+  bot.sendMessage(
+    msg.chat.id,
+    PUBLIC_MODE
+      ? "🔓 Current Mode: PUBLIC"
+      : "🔒 Current Mode: PRIVATE"
+  );
 });
