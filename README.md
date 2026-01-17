@@ -76,8 +76,8 @@ Create a file named `.env` in the root of your project directory. Copy and paste
 
 1.  **Clone the repository:**
 
-        git clone [https://github.com/yourusername/your-repo-name.git](https://github.com/yourusername/your-repo-name.git)
-        cd your-repo-name
+        git clone https://github.com/Aman-20/Telegram_bot.git
+        cd Telegram_bot
 
 2.  **Install dependencies:**
 
