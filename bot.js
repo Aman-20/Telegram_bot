@@ -497,9 +497,9 @@ bot.onText(/\/account/, async (msg) => {
     await user.save();
   }
 
-  const remainingRequests = 20 - user.requests;
+  const remainingRequests = 100 - user.requests;
   const usedTokens = user.usage?.tokensUsed || 0;
-  const remainingTokens = 1000 - usedTokens;
+  const remainingTokens = 50000 - usedTokens;
   const lang = userLanguages[chatId] || "en";
 
   // Calculate midnight reset time
@@ -519,11 +519,11 @@ bot.onText(/\/account/, async (msg) => {
   }
 
   const limits = {
-    search: 10,
-    imagine: 5,
-    doc: 3,
-    img: 3,
-    proTokens: 5
+    search: 50,
+    imagine: 10,
+    doc: 10,
+    img: 10,
+    proTokens: 10
   };
 
   bot.sendMessage(
@@ -533,12 +533,12 @@ bot.onText(/\/account/, async (msg) => {
 ━━━━━━━━━━━━━
 - Requests used today: ${user.requests}
 - Requests remaining: ${remainingRequests}
-- Daily request limit: 20
+- Daily request limit: 100
 
 - Tokens used today: ${usedTokens}
 - Tokens remaining: ${remainingTokens}
-- Daily token limit: 1000
-- Max tokens per reply: 100
+- Daily token limit: 50000
+- Max tokens per reply: 600
 
 🌍 Current language: ${LANGUAGES[lang]} (${lang})
 
@@ -616,8 +616,8 @@ bot.onText(/\/search (.+)/, async (msg, match) => {
   bot.sendChatAction(chatId, "typing");
 
   //added limit to 10
-  if (!checkLimit(chatId, "search", 10)) {
-    bot.sendMessage(chatId, "⚠️ Daily search limit reached (10). Try again tomorrow.");
+  if (!checkLimit(chatId, "search", 50)) {
+    bot.sendMessage(chatId, "⚠️ Daily search limit reached (50). Try again tomorrow.");
     return;
   }
 
@@ -742,8 +742,8 @@ bot.onText(/\/imagine (.+)/, async (msg, match) => {
   bot.sendChatAction(chatId, "upload_photo");
 
   //added limit to 5 image 
-  if (!checkLimit(chatId, "imagine", 5)) {
-    bot.sendMessage(chatId, "⚠️ Daily image generation limit reached (5). Try again tomorrow.");
+  if (!checkLimit(chatId, "imagine", 10)) {
+    bot.sendMessage(chatId, "⚠️ Daily image generation limit reached (10). Try again tomorrow.");
     return;
   }
 
@@ -787,8 +787,8 @@ bot.on("document", async (msg) => {
   bot.sendChatAction(chatId, "typing");
 
   //added limit to 3 
-  if (!checkLimit(chatId, "doc", 3)) {
-    bot.sendMessage(chatId, "⚠️ Daily document analysis limit reached (3). Try again tomorrow.");
+  if (!checkLimit(chatId, "doc", 10)) {
+    bot.sendMessage(chatId, "⚠️ Daily document analysis limit reached (10). Try again tomorrow.");
     return;
   }
 
@@ -868,8 +868,8 @@ bot.on("photo", async (msg) => {
   bot.sendChatAction(chatId, "typing");
 
   //added limit to 3
-  if (!checkLimit(chatId, "img", 3)) {
-    bot.sendMessage(chatId, "⚠️ Daily image analysis limit reached (3). Try again tomorrow.");
+  if (!checkLimit(chatId, "img", 10)) {
+    bot.sendMessage(chatId, "⚠️ Daily image analysis limit reached (10). Try again tomorrow.");
     return;
   }
 
@@ -893,6 +893,15 @@ bot.on("photo", async (msg) => {
   }
 });
 
+// Function to split long messages into chunks
+async function sendLongMessage(chatId, text) {
+  const MAX_LENGTH = 4000;
+  
+  for (let i = 0; i < text.length; i += MAX_LENGTH) {
+    const chunk = text.substring(i, i + MAX_LENGTH);
+    await bot.sendMessage(chatId, chunk); 
+  }
+}
 
 // --- Chat with Gemini ---
 bot.on("message", async (msg) => {
@@ -981,8 +990,8 @@ bot.on("message", async (msg) => {
   }
 
   // Check request limit (20/day)
-  if (user.requests >= 20) {
-    bot.sendMessage(chatId, `⚠️ You’ve reached your daily request limit (20). Try again tomorrow.`);
+  if (user.requests >= 100) {
+    bot.sendMessage(chatId, `⚠️ You’ve reached your daily request limit (100). Try again tomorrow.`);
     return;
   }
 
@@ -991,8 +1000,8 @@ bot.on("message", async (msg) => {
   const inputTokens = Math.ceil(text.split(/\s+/).length * 1.3);
 
   // Check token limit (1000/day)
-  if (user.usage.tokensUsed + inputTokens >= 1000) {
-    bot.sendMessage(chatId, `⚠️ You’ve reached your daily token limit (1000). Try again tomorrow.`);
+  if (user.usage.tokensUsed + inputTokens >= 50000) {
+    bot.sendMessage(chatId, `⚠️ You’ve reached your daily token limit (50000). Try again tomorrow.`);
     return;
   }
 
@@ -1024,7 +1033,7 @@ bot.on("message", async (msg) => {
 
       // Optional: keep Pro limit
       if (chosen.model === "gemini-2.5-flash") {
-        if (!checkLimit(chatId, "proTokens", 5)) {
+        if (!checkLimit(chatId, "proTokens", 10)) {
           bot.sendMessage(chatId, "⚠️ Pro model daily limit reached");
           return;
         }
@@ -1043,7 +1052,7 @@ bot.on("message", async (msg) => {
             parts: [{ text: `Answer in ${LANGUAGES[lang]} (${lang})\n\nConversation so far:\n${history}\n\nUser: ${text}` }],
           },
         ],
-        generationConfig: { maxOutputTokens: 100 },
+        generationConfig: { maxOutputTokens: 800 },
       });
 
       reply = result?.response?.text() || "⚠️ No response from Gemini.";
@@ -1095,8 +1104,8 @@ bot.on("message", async (msg) => {
     const outputTokens = Math.ceil(reply.split(/\s+/).length * 1.3);
 
     // Final check for token limit
-    if (user.usage.tokensUsed + inputTokens + outputTokens > 1000) {
-      bot.sendMessage(chatId, "⚠️ This reply would exceed your daily token limit (1000). Try again tomorrow.");
+    if (user.usage.tokensUsed + inputTokens + outputTokens > 50000) {
+      bot.sendMessage(chatId, "⚠️ This reply would exceed your daily token limit (50000). Try again tomorrow.");
       return;
     }
 
@@ -1115,10 +1124,17 @@ bot.on("message", async (msg) => {
     await user.save();
 
     // Reply with usage info
-    bot.sendMessage(
-      chatId,
-      reply + `\n\n🪙 Requests left: ${20 - user.requests}, Tokens left: ${1000 - user.usage.tokensUsed}`
-    );
+    // NEW CODE - Uses the split function
+    const footer = `\n\n🤖 Model: ${chosen.name}\n🪙 Requests left: ${100 - user.requests}\nTokens left: ${50000 - user.usage.tokensUsed}`;
+    const fullResponse = reply + footer;
+
+    if (fullResponse.length > 4000) {
+      // If too long, split it
+      await sendLongMessage(chatId, fullResponse);
+    } else {
+      // If short enough, send normally
+      bot.sendMessage(chatId, fullResponse);
+    }
   } catch (err) {
     console.error("❌ Gemini error:", err);
     bot.sendMessage(chatId, "❌ BOT ERROR: " + (err.message || "Unknown error"));
@@ -1236,13 +1252,13 @@ bot.onText(/\/remove (\d+)/, (msg, match) => {
 });
 
 //user status
-bot.onText(/\/status/, (msg) => {                      
+bot.onText(/\/status/, (msg) => {
   const chatId = msg.chat.id;
 
   if (PUBLIC_MODE) {
     bot.sendMessage(chatId, "🔓 Bot is currently in PUBLIC MODE");
   }
-  
+
   if (approvedUsers.has(chatId)) {
     bot.sendMessage(chatId, "✅ You have access to this bot. Contact: @dnafork_support for any problem");
   } else {
