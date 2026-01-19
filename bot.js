@@ -66,10 +66,24 @@ async function isUserMember(chatId) {
   }
 }
 
-// --- Approved users (DEV MODE) ---
-const approvedUsers = new Map([
-  [ADMIN_ID, Infinity] // admin never expires
-]);
+// 🔒 Check approval from Database
+async function isUserApproved(chatId) {
+  // 1. Always allow Admin and Public Mode
+  if (PUBLIC_MODE) return true;
+  if (chatId === ADMIN_ID) return true;
+
+  // 2. Check Database
+  const user = await User.findOne({ chatId });
+
+  // 3. If no user or no date set -> Not Approved
+  if (!user || !user.approvedUntil) return false;
+
+  // 4. If date is in the past -> Expired
+  if (new Date() > user.approvedUntil) return false;
+
+  return true; // ✅ Approved
+}
+
 
 // chatId -> last request timestamp (ms)
 const rateLimitMap = new Map();
@@ -209,6 +223,7 @@ mongoose.connect(process.env.MONGODB_CONNECT, { dbName: "Telegram" }).then((req,
 
 const userSchema = new mongoose.Schema({
   chatId: { type: String, required: true, unique: true },
+  approvedUntil: { type: Date, default: null },
   messages: [
     {
       role: { type: String, enum: ["user", "bot"], required: true },
@@ -387,7 +402,7 @@ bot.onText(/\/clearchat/, async (msg) => {
     return;
   }
 
-  if (!PUBLIC_MODE && !approvedUsers.has(msg.chat.id)) return;
+  if (!PUBLIC_MODE && !(await isUserApproved(msg.chat.id))) return;
 
 
 
@@ -447,45 +462,31 @@ bot.onText(/\/terms/, async (msg) => {
 });
 
 
-bot.onText(/\/approve (\d+)/, (msg, match) => {
-  if (msg.chat.id !== ADMIN_ID) {
-    return bot.sendMessage(msg.chat.id, "⚠️ Unauthorized");
-  }
+bot.onText(/\/approve (\d+)/, async (msg, match) => {
+  if (msg.chat.id !== ADMIN_ID) return;
 
-  const userId = Number(match[1]);
-  // Converts hours to milliseconds: Hours * 60 min * 60 sec * 1000 ms
-  const expiresAt = Date.now() + (APPROVAL_HOURS * 60 * 60 * 1000);
+  const userId = match[1];
+  const expiresAt = new Date(Date.now() + (APPROVAL_HOURS * 60 * 60 * 1000));
 
-  approvedUsers.set(userId, expiresAt);
-
-  bot.sendMessage(
-    ADMIN_ID,
-    `✅ User ${userId} approved for 24 hours.`
+  // Update MongoDB (Create user if missing, set new date)
+  await User.findOneAndUpdate(
+    { chatId: userId },
+    { approvedUntil: expiresAt },
+    { upsert: true, new: true }
   );
+
+  bot.sendMessage(ADMIN_ID, `✅ User ${userId} approved until ${expiresAt.toLocaleString()}`);
 });
 
 
-function guardAccess(msg) {
-  // 🔓 Public mode: allow everyone
-  if (PUBLIC_MODE) return true;
-
+async function guardAccess(msg) {
   const chatId = msg.chat.id;
-  const expiry = approvedUsers.get(chatId);
+  const approved = await isUserApproved(chatId); // 👈 Checks DB now
 
-  if (!expiry) {
-    bot.sendMessage(chatId, "🚧 This bot is private Contact: @dnafork_support to get access");
+  if (!approved) {
+    bot.sendMessage(chatId, "🚧 You do not have access. Contact: @dnafork_support");
     return false;
   }
-
-  if (Date.now() > expiry) {
-    approvedUsers.delete(chatId);
-    bot.sendMessage(
-      chatId,
-      "⏳ Your access has expired. Please request access again."
-    );
-    return false;
-  }
-
   return true;
 }
 
@@ -508,7 +509,7 @@ bot.onText(/\/account/, async (msg) => {
     return;
   }
 
-  if (!PUBLIC_MODE && !approvedUsers.has(msg.chat.id)) return;
+  if (!PUBLIC_MODE && !(await isUserApproved(msg.chat.id))) return;
 
 
   // Fetch user from DB
@@ -635,7 +636,7 @@ bot.onText(/\/search (.+)/, async (msg, match) => {
     return;
   }
 
-  if (!PUBLIC_MODE && !approvedUsers.has(msg.chat.id)) return;
+  if (!PUBLIC_MODE && !(await isUserApproved(msg.chat.id))) return;
   if (!guardCommandRateLimit(msg, "search")) return;
 
 
@@ -707,7 +708,7 @@ bot.onText(/\/setmodel/, async (msg) => {
     return;
   }
 
-  if (!PUBLIC_MODE && !approvedUsers.has(msg.chat.id)) return;
+  if (!PUBLIC_MODE && !(await isUserApproved(msg.chat.id))) return;
 
 
   // Build buttons dynamically only for models with keys
@@ -763,7 +764,7 @@ bot.onText(/\/imagine (.+)/, async (msg, match) => {
     return;
   }
 
-  if (!PUBLIC_MODE && !approvedUsers.has(msg.chat.id)) return;
+  if (!PUBLIC_MODE && !(await isUserApproved(msg.chat.id))) return;
   if (!guardCommandRateLimit(msg, "imagine")) return;
 
   const prompt = match[1];
@@ -807,7 +808,7 @@ bot.on("document", async (msg) => {
     return;
   }
 
-  if (!PUBLIC_MODE && !approvedUsers.has(msg.chat.id)) return;
+  if (!PUBLIC_MODE && !(await isUserApproved(msg.chat.id))) return;
   if (!guardRateLimitMedia(msg)) return;
 
 
@@ -888,7 +889,7 @@ bot.on("photo", async (msg) => {
     return;
   }
 
-  if (!PUBLIC_MODE && !approvedUsers.has(msg.chat.id)) return;
+  if (!PUBLIC_MODE && !(await isUserApproved(msg.chat.id))) return;
   if (!guardRateLimitMedia(msg)) return;
 
 
@@ -952,7 +953,7 @@ bot.on("message", async (msg) => {
     return;
   }
 
-  if (!guardAccess(msg)) return;
+  if (!await guardAccess(msg)) return;
   if (!guardRateLimit(msg)) return;
 
   const text = msg.text;
@@ -1162,8 +1163,14 @@ bot.on("message", async (msg) => {
       // If too long, split it
       await sendLongMessage(chatId, fullResponse);
     } else {
-      // If short enough, send normally
-      bot.sendMessage(chatId, fullResponse);
+      // Short message: Send as Markdown (Looks professional)
+      // We use try/catch in case Gemini generates broken Markdown
+      try {
+        await bot.sendMessage(chatId, fullResponse, { parse_mode: "Markdown" });
+      } catch (err) {
+        // Fallback to plain text if Markdown fails
+        await bot.sendMessage(chatId, fullResponse);
+      }
     }
   } catch (err) {
     console.error("❌ Gemini error:", err);
@@ -1235,61 +1242,47 @@ Requests: ${u.requests}, Tokens: ${u.usage?.tokensUsed || 0}
 
 
 //see users
-bot.onText(/\/users/, (msg) => {
-  if (msg.chat.id !== ADMIN_ID) {
-    return bot.sendMessage(msg.chat.id, "⚠️ Unauthorized");
-  }
+bot.onText(/\/users/, async (msg) => { // 👈 Mark as async
+  if (msg.chat.id !== ADMIN_ID) return;
 
-  if (approvedUsers.size === 0) {
-    return bot.sendMessage(ADMIN_ID, "📭 No approved users.");
+  // Find all users where approvedUntil is in the FUTURE ($gt = Greater Than)
+  const users = await User.find({ approvedUntil: { $gt: new Date() } });
+
+  if (users.length === 0) {
+    return bot.sendMessage(ADMIN_ID, "📭 No active users.");
   }
 
   let text = "👥 *Approved Users*\n━━━━━━━━━━━━━\n";
-  let i = 1;
-
-  for (const [id, expiry] of approvedUsers.entries()) {
-    const remaining =
-      expiry === Infinity
-        ? "∞"
-        : Math.max(0, Math.ceil((expiry - Date.now()) / (60 * 60 * 1000))) + "h";
-
-    text += `${i}. \`${id}\` — ⏳ ${remaining}\n`;
-    i++;
-  }
+  users.forEach((u, i) => {
+    const remaining = Math.max(0, Math.ceil((new Date(u.approvedUntil) - Date.now()) / (3600000))) + "h";
+    text += `${i + 1}. \`${u.chatId}\` — ⏳ ${remaining}\n`;
+  });
 
   bot.sendMessage(ADMIN_ID, text, { parse_mode: "Markdown" });
 });
 
 
 //remove users
-bot.onText(/\/remove (\d+)/, (msg, match) => {
-  if (msg.chat.id !== ADMIN_ID) {
-    return bot.sendMessage(msg.chat.id, "⚠️ Unauthorized");
-  }
+bot.onText(/\/remove (\d+)/, async (msg, match) => {
+  if (msg.chat.id !== ADMIN_ID) return;
+  const userId = match[1];
 
-  const userId = Number(match[1]);
+  // Set date to null to remove access
+  await User.findOneAndUpdate({ chatId: userId }, { approvedUntil: null });
 
-  if (userId === ADMIN_ID) {
-    return bot.sendMessage(ADMIN_ID, "❌ You cannot remove yourself.");
-  }
-
-  if (!approvedUsers.has(userId)) {
-    return bot.sendMessage(ADMIN_ID, "⚠️ User is not approved.");
-  }
-
-  approvedUsers.delete(userId);
-  bot.sendMessage(ADMIN_ID, `❌ User ${userId} removed from approved list.`);
+  bot.sendMessage(ADMIN_ID, `❌ User ${userId} removed.`);
 });
 
+
 //user status
-bot.onText(/\/status/, (msg) => {
+bot.onText(/\/status/, async (msg) => {
   const chatId = msg.chat.id;
 
   if (PUBLIC_MODE) {
     bot.sendMessage(chatId, "🔓 Bot is currently in PUBLIC MODE");
   }
 
-  if (approvedUsers.has(chatId)) {
+  if (await isUserApproved(chatId)) {
     bot.sendMessage(chatId, "✅ You have access to this bot. Contact: @dnafork_support for any problem");
   } else {
     bot.sendMessage(chatId, "🚧 You do not have access.");
