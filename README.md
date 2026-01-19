@@ -35,40 +35,7 @@ Before you begin, ensure you have the following:
 
 ## 🚀 Environment Configuration
 
-Create a file named `.env` in the root of your project directory. Copy and paste the keys below and fill in your details:
-
-    # 🤖 Telegram Bot Token (Required)
-    # Get this from @BotFather on Telegram
-    TELEGRAM_TOKEN=your_telegram_bot_token_here
-    
-    # 🧠 AI API Keys (Gemini is Required)
-    # Get Gemini key: [https://aistudio.google.com/app/apikey](https://aistudio.google.com/app/apikey)
-    GEMINI_API_KEY=your_gemini_api_key_here
-    
-    # Optional: Add these if you want to use OpenAI or Claude models
-    # OPENAI_API_KEY=sk-...
-    # CLAUDE_API_KEY=sk-...
-    
-    # 💾 Database (Required)
-    # Connection string from MongoDB Atlas
-    MONGODB_CONNECT=mongodb+srv://user:pass@cluster.mongodb.net/Telegram
-    
-    # 🔍 Search Capability (Required for /search)
-    # Get a free key: [https://serper.dev/](https://serper.dev/)
-    SERPER_API_KEY=your_serper_api_key_here
-    
-    # 🌐 Deployment URL (Required for Webhooks)
-    # The URL where your bot is hosted (e.g., [https://my-bot.onrender.com](https://my-bot.onrender.com))
-    # If running locally, you need a tunnel like Ngrok.
-    RENDER_URL=[https://your-app-url.onrender.com](https://your-app-url.onrender.com)
-    
-    # 👮 Admin & Security
-    # Your Telegram User ID (get it from @userinfobot)
-    ADMIN_ID=123456789
-    
-    # Force users to join this channel to use the bot (Optional)
-    # Leave empty if not needed. Format: @channelname
-    FORCE_JOIN_CHANNEL=@your_channel
+Change file named `.env.example` to `.env` and enter all the required api keys.
 
 ---
 
@@ -87,7 +54,7 @@ Create a file named `.env` in the root of your project directory. Copy and paste
 
         npm start
 
-    *Note: Since this bot uses Webhooks, running it locally requires a public URL. We recommend using **Render** for easy deployment.*
+    *Note: Since this bot uses Webhooks, running it locally requires a public URL. We recommend using **ngrok** for using locally.*
 
 ---
 
