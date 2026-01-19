@@ -16,6 +16,25 @@ const mammoth = require("mammoth");
 
 dotenv.config();
 
+// --- CONFIGURATION FROM ENV ---
+const DAILY_REQUEST_LIMIT = parseInt(process.env.DAILY_REQUEST_LIMIT);
+const DAILY_TOKEN_LIMIT = parseInt(process.env.DAILY_TOKEN_LIMIT);
+const MAX_REPLY_TOKENS = parseInt(process.env.MAX_REPLY_TOKENS);
+
+const HISTORY_MESSAGES = parseInt(process.env.HISTORY_MESSAGES);
+const DB_MSG_LIMIT = parseInt(process.env.DB_MSG_LIMIT);
+
+const RATE_LIMIT = (parseInt(process.env.RATE_LIMIT_MS)) * 1000;
+const COMMAND_LIMIT = (parseInt(process.env.COMMAND_LIMIT_MS)) * 1000;
+
+const SEARCH_LIMIT = parseInt(process.env.SEARCH_LIMIT);
+const IMAGINE_LIMIT = parseInt(process.env.IMAGINE_LIMIT);
+const DOC_LIMIT = parseInt(process.env.LIMIT_DOC_ANALYSIS);
+const LIMIT_IMG = parseInt(process.env.LIMIT_IMG_ANALYSIS);
+const LIMIT_PRO = parseInt(process.env.LIMIT_PRO_MODEL);
+
+const APPROVAL_HOURS = parseFloat(process.env.APPROVAL_EXPIRY_HOURS);
+
 // 🔒 GLOBAL SAFETY NETS
 process.on("unhandledRejection", (err) => {
   console.error("Unhandled rejection:", err);
@@ -54,7 +73,7 @@ const approvedUsers = new Map([
 
 // chatId -> last request timestamp (ms)
 const rateLimitMap = new Map();
-const RATE_LIMIT_MS = 10 * 1000; // 10 seconds
+const RATE_LIMIT_MS = RATE_LIMIT
 
 //limit on message 
 function guardRateLimit(msg) {
@@ -85,26 +104,33 @@ function guardRateLimit(msg) {
 }
 
 //limit on media 
+const mediaRateLimit = new Map();
+// NEW: Media-specific rate limit function
 function guardRateLimitMedia(msg) {
   const chatId = msg.chat.id;
   const now = Date.now();
-  const last = rateLimitMap.get(chatId) || 0;
 
-  const remaining = RATE_LIMIT_MS - (now - last);
+  // 1. Get the limit from .env
+  const COOLDOWN = (parseInt(process.env.LIMIT_MEDIA_COOLDOWN)) * 1000;
+
+  // 2. Check the MEDIA map, not the text map
+  const last = mediaRateLimit.get(chatId) || 0;
+  const remaining = COOLDOWN - (now - last);
 
   if (remaining > 0) {
     const seconds = Math.ceil(remaining / 1000);
-    bot.sendMessage(chatId, `⏳ Please wait ${seconds}s before sending another request.`);
+    bot.sendMessage(chatId, `⏳ Please wait ${seconds}s before sending another file.`);
     return false;
   }
 
-  rateLimitMap.set(chatId, now);
+  // 3. Update the MEDIA map
+  mediaRateLimit.set(chatId, now);
   return true;
 }
 
 //limit on search and imagine
 const commandRateLimit = new Map();
-const COMMAND_LIMIT_MS = 60 * 1000; // 60 seconds
+const COMMAND_LIMIT_MS = COMMAND_LIMIT
 function guardCommandRateLimit(msg, commandName) {
   const chatId = msg.chat.id;
   const key = `${chatId}:${commandName}`;
@@ -133,42 +159,42 @@ async function downloadFile(fileId) {
 
 const MODELS = {
   gemini: {
-    name: "Best Model: Auto ",
+    name: process.env.GEMINI_MODEL_1,
     key: process.env.GEMINI_API_KEY,
     provider: "gemini",
-    model: "gemma-3-4b-it",
+    model: process.env.GEMINI_MODEL_1,
   },
   gemini_flash1: {
-    name: "Gemini 2.5 Flash",
+    name: process.env.GEMINI_MODEL_3,
     key: process.env.GEMINI_API_KEY,
     provider: "gemini",
-    model: "gemma-3-27b-it",
+    model: process.env.GEMINI_MODEL_3,
   },
   gemini_flash2: {
-    name: "Gemini 2.5 Flash Lite",
+    name: process.env.GEMINI_MODEL_2,
     key: process.env.GEMINI_API_KEY,
     provider: "gemini",
-    model: "gemma-3-12b-it",
+    model: process.env.GEMINI_MODEL_2,
   },
   gemini_flash3: {
-    name: "Gemini 3 Flash",
+    name: process.env.GEMINI_MODEL_5,
     key: process.env.GEMINI_API_KEY,
     provider: "gemini",
-    model: "gemini-2.5-flash-lite",
+    model: process.env.GEMINI_MODEL_5,
   },
   gemini_pro: {
-    name: "Gemini 3 Pro",
+    name: process.env.GEMINI_MODEL_4,
     key: process.env.GEMINI_API_KEY,
     provider: "gemini",
-    model: "gemini-2.5-flash",
+    model: process.env.GEMINI_MODEL_4,
   },
   openai: {
-    name: "GPT-4o-mini",
+    name: process.env.OPENAI_MODEL_1,
     key: process.env.OPENAI_API_KEY,
     type: "openai"
   },
   claude: {
-    name: "Claude 3 Haiku",
+    name: process.env.CLAUDE_MODEL_1,
     key: process.env.CLAUDE_API_KEY,
     type: "claude"
   },
@@ -280,7 +306,7 @@ const LANGUAGES = {
 
 //usage limit 
 const userUsage = {};
-// Format: userUsage[chatId] = { date: "YYYY-MM-DD", search: 0, imagine: 0, doc: 0, img: 0, proTokens: 0 }
+
 function getToday() {
   return new Date().toISOString().slice(0, 10);
 }
@@ -427,7 +453,8 @@ bot.onText(/\/approve (\d+)/, (msg, match) => {
   }
 
   const userId = Number(match[1]);
-  const expiresAt = Date.now() + 24 * 60 * 60 * 1000; // 24hours
+  // Converts hours to milliseconds: Hours * 60 min * 60 sec * 1000 ms
+  const expiresAt = Date.now() + (APPROVAL_HOURS * 60 * 60 * 1000);
 
   approvedUsers.set(userId, expiresAt);
 
@@ -497,9 +524,9 @@ bot.onText(/\/account/, async (msg) => {
     await user.save();
   }
 
-  const remainingRequests = 100 - user.requests;
+  const remainingRequests = DAILY_REQUEST_LIMIT - user.requests;
   const usedTokens = user.usage?.tokensUsed || 0;
-  const remainingTokens = 50000 - usedTokens;
+  const remainingTokens = DAILY_TOKEN_LIMIT - usedTokens;
   const lang = userLanguages[chatId] || "en";
 
   // Calculate midnight reset time
@@ -519,11 +546,11 @@ bot.onText(/\/account/, async (msg) => {
   }
 
   const limits = {
-    search: 50,
-    imagine: 10,
-    doc: 10,
-    img: 10,
-    proTokens: 10
+    search: SEARCH_LIMIT,
+    imagine: IMAGINE_LIMIT,
+    doc: DOC_LIMIT,
+    img: LIMIT_IMG,
+    proTokens: LIMIT_PRO
   };
 
   bot.sendMessage(
@@ -533,12 +560,12 @@ bot.onText(/\/account/, async (msg) => {
 ━━━━━━━━━━━━━
 - Requests used today: ${user.requests}
 - Requests remaining: ${remainingRequests}
-- Daily request limit: 100
+- Daily request limit: ${DAILY_REQUEST_LIMIT}
 
 - Tokens used today: ${usedTokens}
 - Tokens remaining: ${remainingTokens}
-- Daily token limit: 50000
-- Max tokens per reply: 600
+- Daily token limit: ${DAILY_TOKEN_LIMIT}
+- Max tokens per reply: ${MAX_REPLY_TOKENS}
 
 🌍 Current language: ${LANGUAGES[lang]} (${lang})
 
@@ -615,9 +642,9 @@ bot.onText(/\/search (.+)/, async (msg, match) => {
   const query = match[1];
   bot.sendChatAction(chatId, "typing");
 
-  //added limit to 10
-  if (!checkLimit(chatId, "search", 50)) {
-    bot.sendMessage(chatId, "⚠️ Daily search limit reached (50). Try again tomorrow.");
+  //added Search limit 
+  if (!checkLimit(chatId, "search", SEARCH_LIMIT)) {
+    bot.sendMessage(chatId, `⚠️ Daily search limit reached (${SEARCH_LIMIT}). Try again tomorrow.`);
     return;
   }
 
@@ -638,7 +665,9 @@ bot.onText(/\/search (.+)/, async (msg, match) => {
 
     const data = await res.json();
 
-    const results = data.organic?.slice(0, 5)
+    const SEARCH_RESULTS = parseInt(process.env.SEARCH_RESULTS);
+
+    const results = data.organic?.slice(0, SEARCH_RESULTS)
       .map((r, i) => `${i + 1}. [${r.title}](${r.link})\n${r.snippet}`)
       .join("\n\n");
 
@@ -741,9 +770,9 @@ bot.onText(/\/imagine (.+)/, async (msg, match) => {
 
   bot.sendChatAction(chatId, "upload_photo");
 
-  //added limit to 5 image 
-  if (!checkLimit(chatId, "imagine", 10)) {
-    bot.sendMessage(chatId, "⚠️ Daily image generation limit reached (10). Try again tomorrow.");
+  //added imagine limit  
+  if (!checkLimit(chatId, "imagine", IMAGINE_LIMIT)) {
+    bot.sendMessage(chatId, `⚠️ Daily image generation limit reached (${IMAGINE_LIMIT}). Try again tomorrow.`);
     return;
   }
 
@@ -786,9 +815,9 @@ bot.on("document", async (msg) => {
 
   bot.sendChatAction(chatId, "typing");
 
-  //added limit to 3 
-  if (!checkLimit(chatId, "doc", 10)) {
-    bot.sendMessage(chatId, "⚠️ Daily document analysis limit reached (10). Try again tomorrow.");
+  //added document analysis limit
+  if (!checkLimit(chatId, "doc", DOC_LIMIT)) {
+    bot.sendMessage(chatId, `⚠️ Daily document analysis limit reached (${DOC_LIMIT}). Try again tomorrow.`);
     return;
   }
 
@@ -819,14 +848,15 @@ bot.on("document", async (msg) => {
       return;
     }
 
-    if (text.length > 20000) text = text.slice(0, 20000); // safety limit
+    const DOC_CHAR_LIMIT = parseInt(process.env.DOC_CHAR_LIMIT);
+    if (text.length > DOC_CHAR_LIMIT) text = text.slice(0, DOC_CHAR_LIMIT);
 
-    const docModel = genAI.getGenerativeModel({ model: "gemini-2.5-flash-lite" });
+    const docModel = genAI.getGenerativeModel({ model: process.env.GEMINI_MODEL_5 });
     const result = await docModel.generateContent({
       contents: [
         { role: "user", parts: [{ text: `Summarize this document:\n\n${text}` }] }
       ],
-      generationConfig: { maxOutputTokens: 200 }
+      generationConfig: { maxOutputTokens: MAX_REPLY_TOKENS }
     });
 
     const reply = result?.response?.text() || "⚠️ No response from Gemini.";
@@ -867,9 +897,9 @@ bot.on("photo", async (msg) => {
 
   bot.sendChatAction(chatId, "typing");
 
-  //added limit to 3
-  if (!checkLimit(chatId, "img", 10)) {
-    bot.sendMessage(chatId, "⚠️ Daily image analysis limit reached (10). Try again tomorrow.");
+  //added image analysis limit
+  if (!checkLimit(chatId, "img", LIMIT_IMG)) {
+    bot.sendMessage(chatId, `⚠️ Daily image analysis limit reached (${LIMIT_IMG}). Try again tomorrow.`);
     return;
   }
 
@@ -878,7 +908,7 @@ bot.on("photo", async (msg) => {
     const fileBuffer = await downloadFile(photo.file_id);
     const base64Image = fileBuffer.toString("base64");
 
-    const imgModel = genAI.getGenerativeModel({ model: "gemini-2.5-flash-lite" });
+    const imgModel = genAI.getGenerativeModel({ model: process.env.GEMINI_MODEL_5 });
     const result = await imgModel.generateContent([
       "Describe this image clearly.",
       { inlineData: { data: base64Image, mimeType: "image/jpeg" } }
@@ -896,10 +926,10 @@ bot.on("photo", async (msg) => {
 // Function to split long messages into chunks
 async function sendLongMessage(chatId, text) {
   const MAX_LENGTH = 4000;
-  
+
   for (let i = 0; i < text.length; i += MAX_LENGTH) {
     const chunk = text.substring(i, i + MAX_LENGTH);
-    await bot.sendMessage(chatId, chunk); 
+    await bot.sendMessage(chatId, chunk);
   }
 }
 
@@ -989,9 +1019,9 @@ bot.on("message", async (msg) => {
     user.usage.resetDate = new Date();
   }
 
-  // Check request limit (20/day)
-  if (user.requests >= 100) {
-    bot.sendMessage(chatId, `⚠️ You’ve reached your daily request limit (100). Try again tomorrow.`);
+  // Check daily request limit 
+  if (user.requests >= DAILY_REQUEST_LIMIT) {
+    bot.sendMessage(chatId, `⚠️ You’ve reached your daily request limit (${DAILY_REQUEST_LIMIT}). Try again tomorrow.`);
     return;
   }
 
@@ -999,9 +1029,9 @@ bot.on("message", async (msg) => {
   if (typeof text !== "string") return;
   const inputTokens = Math.ceil(text.split(/\s+/).length * 1.3);
 
-  // Check token limit (1000/day)
-  if (user.usage.tokensUsed + inputTokens >= 50000) {
-    bot.sendMessage(chatId, `⚠️ You’ve reached your daily token limit (50000). Try again tomorrow.`);
+  // Check token limit per day
+  if (user.usage.tokensUsed + inputTokens >= DAILY_TOKEN_LIMIT) {
+    bot.sendMessage(chatId, `⚠️ You’ve reached your daily token limit (${DAILY_TOKEN_LIMIT}). Try again tomorrow.`);
     return;
   }
 
@@ -1011,9 +1041,9 @@ bot.on("message", async (msg) => {
   try {
     bot.sendChatAction(chatId, "typing");
 
-    // Get last 10 messages for context
+    // Get last messages for context
     const history = user.messages
-      .slice(-10)
+      .slice(-HISTORY_MESSAGES)
       .map((m) => `${m.role}: ${m.text}`)
       .join("\n");
 
@@ -1032,9 +1062,9 @@ bot.on("message", async (msg) => {
     if (chosen.provider === "gemini") {
 
       // Optional: keep Pro limit
-      if (chosen.model === "gemini-2.5-flash") {
-        if (!checkLimit(chatId, "proTokens", 10)) {
-          bot.sendMessage(chatId, "⚠️ Pro model daily limit reached");
+      if (chosen.model === process.env.GEMINI_MODEL_4) {
+        if (!checkLimit(chatId, "proTokens", LIMIT_PRO)) {
+          bot.sendMessage(chatId, `⚠️ Pro model daily limit reached (${LIMIT_PRO})`);
           return;
         }
       }
@@ -1042,7 +1072,7 @@ bot.on("message", async (msg) => {
       //console.log("ACTIVE MODEL:", chosen.model);
 
       const dynamicModel = genAI.getGenerativeModel({
-        model: chosen.model || "gemma-3-1b-it"
+        model: chosen.model
       });
 
       const result = await dynamicModel.generateContent({
@@ -1052,7 +1082,7 @@ bot.on("message", async (msg) => {
             parts: [{ text: `Answer in ${LANGUAGES[lang]} (${lang})\n\nConversation so far:\n${history}\n\nUser: ${text}` }],
           },
         ],
-        generationConfig: { maxOutputTokens: 800 },
+        generationConfig: { maxOutputTokens: MAX_REPLY_TOKENS },
       });
 
       reply = result?.response?.text() || "⚠️ No response from Gemini.";
@@ -1067,12 +1097,12 @@ bot.on("message", async (msg) => {
       const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 
       const result = await openai.chat.completions.create({
-        model: "gpt-4o-mini",
+        model: process.env.OPENAI_MODEL_1,
         messages: [
           { role: "system", content: "You are a helpful assistant." },
           { role: "user", content: `Answer in ${LANGUAGES[lang]} (${lang})\n\nConversation so far:\n${history}\n\nUser: ${text}` }
         ],
-        max_tokens: 100
+        max_tokens: MAX_REPLY_TOKENS
       });
 
       reply = result.choices[0].message.content || "⚠ No response from OpenAI.";
@@ -1086,8 +1116,8 @@ bot.on("message", async (msg) => {
       const Anthropic = (await import("@anthropic-ai/sdk")).default;
       const anthropic = new Anthropic({ apiKey: process.env.CLAUDE_API_KEY });
       const response = await anthropic.messages.create({
-        model: "claude-3-haiku-20240307",
-        max_tokens: 100,
+        model: process.env.CLAUDE_MODEL_1,
+        max_tokens: MAX_REPLY_TOKENS,
         messages: [
           {
             role: "user",
@@ -1104,8 +1134,8 @@ bot.on("message", async (msg) => {
     const outputTokens = Math.ceil(reply.split(/\s+/).length * 1.3);
 
     // Final check for token limit
-    if (user.usage.tokensUsed + inputTokens + outputTokens > 50000) {
-      bot.sendMessage(chatId, "⚠️ This reply would exceed your daily token limit (50000). Try again tomorrow.");
+    if (user.usage.tokensUsed + inputTokens + outputTokens > DAILY_TOKEN_LIMIT) {
+      bot.sendMessage(chatId, `⚠️ This reply would exceed your daily token limit (${DAILY_TOKEN_LIMIT}). Try again tomorrow.`);
       return;
     }
 
@@ -1114,8 +1144,8 @@ bot.on("message", async (msg) => {
     user.messages.push({ role: "bot", text: reply });
 
     //limit number of chat saved
-    if (user.messages.length > 50) {
-      user.messages = user.messages.slice(-50);
+    if (user.messages.length > DB_MSG_LIMIT) {
+      user.messages = user.messages.slice(-DB_MSG_LIMIT);
     }
 
     // Update usage
@@ -1125,7 +1155,7 @@ bot.on("message", async (msg) => {
 
     // Reply with usage info
     // NEW CODE - Uses the split function
-    const footer = `\n\n🤖 Model: ${chosen.name}\n🪙 Requests left: ${100 - user.requests}\nTokens left: ${50000 - user.usage.tokensUsed}`;
+    const footer = `\n\n🤖 Model: ${chosen.name}\n🪙 Requests left: ${DAILY_REQUEST_LIMIT - user.requests}\nTokens left: ${DAILY_TOKEN_LIMIT - user.usage.tokensUsed}`;
     const fullResponse = reply + footer;
 
     if (fullResponse.length > 4000) {
