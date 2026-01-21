@@ -66,6 +66,22 @@ async function isUserMember(chatId) {
   }
 }
 
+// ✅ New Helper Function
+async function checkMembership(msg) {
+  const chatId = msg.chat.id;
+  if (await isUserMember(chatId)) return true; // User is member, allow
+
+  // User is NOT member, send warning
+  bot.sendMessage(chatId, `⚠️ You must join our channel first to use this bot.`, {
+    reply_markup: {
+      inline_keyboard: [
+        [{ text: "📢 Join Channel", url: `https://t.me/${FORCE_JOIN_CHANNEL.replace("@", "")}` }]
+      ]
+    }
+  });
+  return false; // Block execution
+}
+
 // 🔒 Check approval from Database
 async function isUserApproved(chatId) {
   // 1. Always allow Admin and Public Mode
@@ -281,8 +297,7 @@ const mainKeyboard = {
   reply_markup: {
     keyboard: [
       ["🔍 Search", "🎨 Imagine"],
-      ["🤖 Set Model", "📄 Document Analysis"],
-      [{ text: '/status' }, { text: '/account' }]
+      ["🚫 Report Error", "📄 Document Analysis"],
     ],
     resize_keyboard: true,
     one_time_keyboard: false
@@ -296,9 +311,11 @@ bot.setMyCommands([
   { command: "help", description: "📝List of commands" },
   { command: "account", description: "👤 My account info" },
   { command: "language", description: "🌐 Change language" },
+  { command: "setmodel", description: "🐱‍👤 Select Ai Models" },
   { command: "clearchat", description: "🧹 Clear chat history" },
   { command: "about", description: "👀About this bot" },
   { command: "terms", description: "📜 Terms of service" },
+  { command: "status", description: "✅ Check your bot access" },
 
 ]);
 
@@ -338,44 +355,62 @@ function checkLimit(chatId, type, limit) {
 }
 
 // --- Commands ---
-bot.onText(/\/start/, (msg) => {
+bot.onText(/\/start/, async (msg) => {
+  if (!await checkMembership(msg)) return;
+
   bot.sendMessage(msg.chat.id, `👋 Hi ${msg.from.first_name}!
 I am your Private AI assistant.
 Type any question and I'll try to answer`, mainKeyboard
   );
 });
 
-bot.onText(/\/help/, (msg) => {
-  bot.sendMessage(msg.chat.id, `📌 Available commands:
+
+bot.onText(/\/help/, async (msg) => {
+  // 1. Check if user is a member of the channel first
+  if (!await checkMembership(msg)) return;
+
+  const chatId = msg.chat.id;
+
+  // 2. Define the Standard Help Message (Visible to everyone)
+  let helpMessage = `📌 *Available commands:*
 /start - Start the bot
-/status - Do you have access?
-/help - Show help
+/status - Check access status
+/help - Show this help menu
 /about - About this bot
 /clearchat - Clear chat history
-/terms - Terms of services
+/terms - Terms of service
 /account - My account info
-/imagine - For image generation
-/search - For Web Search
-/setmodel - To choose from different Ai Models
+/setmodel - Choose AI Model
 /language - Change language
+/imagine A dancing panda 
+/search Today's latest news 
 
-🎧 Command for Admin:
-/broadcast - Any Message
-/usage - To check usage report
-/approve - Give user approval
+💡 *Tip:* Send any document or photo for analysis!
+`;
+
+  // 3. Append Admin Commands ONLY if the user is the Admin
+  if (chatId === ADMIN_ID) {
+    helpMessage += `
+🎧 *Admin Commands:*
+/broadcast - Send message to all users
+/usage - Check usage report
+/approve - Approve a user manually
 /remove - Remove user approval
-/users - List of approved users
-/mode - Check private or public
-/private - set bot to private mode 
-/public - set bot to public mode 
+/users - List approved users
+/mode - Check Private/Public mode
+/private - Set bot to Private mode
+/public - Set bot to Public mode
+`;
+  }
 
-Additionaly you can send any documemt and photo 
-for analysis and other related questions.
-`);
-
+  // 4. Send the message
+  bot.sendMessage(chatId, helpMessage, { parse_mode: "Markdown" });
 });
 
-bot.onText(/\/about/, (msg) => {
+
+bot.onText(/\/about/, async (msg) => {
+  if (!await checkMembership(msg)) return;
+
   bot.sendMessage(msg.chat.id, `🤖 This bot is built with:
 - Telegram Bot API
 - Google Gemini API
@@ -385,26 +420,13 @@ bot.onText(/\/about/, (msg) => {
 - Node.js`);
 });
 
+
 bot.onText(/\/clearchat/, async (msg) => {
   const chatId = msg.chat.id;
 
-  if (!(await isUserMember(chatId))) {
-    bot.sendMessage(chatId,
-      `⚠️ You must join our channel first to use this bot.`,
-      {
-        reply_markup: {
-          inline_keyboard: [
-            [{ text: "📢 Join Channel", url: `https://t.me/${FORCE_JOIN_CHANNEL.replace("@", "")}` }]
-          ]
-        }
-      }
-    );
-    return;
-  }
+  if (!await checkMembership(msg)) return;
 
   if (!PUBLIC_MODE && !(await isUserApproved(msg.chat.id))) return;
-
-
 
   let user = await User.findOne({ chatId });
   if (!user) {
@@ -423,19 +445,7 @@ bot.onText(/\/clearchat/, async (msg) => {
 bot.onText(/\/terms/, async (msg) => {
   const chatId = msg.chat.id;
 
-  if (!(await isUserMember(chatId))) {
-    bot.sendMessage(chatId,
-      `⚠️ You must join our channel first to use this bot.`,
-      {
-        reply_markup: {
-          inline_keyboard: [
-            [{ text: "📢 Join Channel", url: `https://t.me/${FORCE_JOIN_CHANNEL.replace("@", "")}` }]
-          ]
-        }
-      }
-    );
-    return;
-  }
+  if (!await checkMembership(msg)) return;
 
   const terms = `
   📜 *Terms of Service*
@@ -494,20 +504,7 @@ async function guardAccess(msg) {
 bot.onText(/\/account/, async (msg) => {
   const chatId = msg.chat.id;
 
-  //force join 
-  if (!(await isUserMember(chatId))) {
-    bot.sendMessage(chatId,
-      `⚠️ You must join our channel first to use this bot.`,
-      {
-        reply_markup: {
-          inline_keyboard: [
-            [{ text: "📢 Join Channel", url: `https://t.me/${FORCE_JOIN_CHANNEL.replace("@", "")}` }]
-          ]
-        }
-      }
-    );
-    return;
-  }
+  if (!await checkMembership(msg)) return;
 
   if (!PUBLIC_MODE && !(await isUserApproved(msg.chat.id))) return;
 
@@ -585,8 +582,10 @@ bot.onText(/\/account/, async (msg) => {
 });
 
 
-bot.onText(/\/language/, (msg) => {
+bot.onText(/\/language/, async (msg) => {
   const chatId = msg.chat.id;
+
+  if (!await checkMembership(msg)) return;
 
   // Convert LANGUAGES object to inline keyboard (2 buttons per row)
   const buttons = Object.entries(LANGUAGES).map(([code, name]) => {
@@ -621,20 +620,8 @@ bot.on("callback_query", (query) => {
 //search the web
 bot.onText(/\/search (.+)/, async (msg, match) => {
   const chatId = msg.chat.id;
-  //force join 
-  if (!(await isUserMember(chatId))) {
-    bot.sendMessage(chatId,
-      `⚠️ You must join our channel first to use this bot.`,
-      {
-        reply_markup: {
-          inline_keyboard: [
-            [{ text: "📢 Join Channel", url: `https://t.me/${FORCE_JOIN_CHANNEL.replace("@", "")}` }]
-          ]
-        }
-      }
-    );
-    return;
-  }
+
+  if (!await checkMembership(msg)) return;
 
   if (!PUBLIC_MODE && !(await isUserApproved(msg.chat.id))) return;
   if (!guardCommandRateLimit(msg, "search")) return;
@@ -693,20 +680,7 @@ bot.onText(/\/search (.+)/, async (msg, match) => {
 bot.onText(/\/setmodel/, async (msg) => {
   const chatId = msg.chat.id;
 
-  //force join
-  if (!(await isUserMember(chatId))) {
-    bot.sendMessage(chatId,
-      `⚠️ You must join our channel first to use this bot.`,
-      {
-        reply_markup: {
-          inline_keyboard: [
-            [{ text: "📢 Join Channel", url: `https://t.me/${FORCE_JOIN_CHANNEL.replace("@", "")}` }]
-          ]
-        }
-      }
-    );
-    return;
-  }
+  if (!await checkMembership(msg)) return;
 
   if (!PUBLIC_MODE && !(await isUserApproved(msg.chat.id))) return;
 
@@ -749,20 +723,7 @@ bot.on("callback_query", async (query) => {
 bot.onText(/\/imagine (.+)/, async (msg, match) => {
   const chatId = msg.chat.id;
 
-  //force join
-  if (!(await isUserMember(chatId))) {
-    bot.sendMessage(chatId,
-      `⚠️ You must join our channel first to use this bot.`,
-      {
-        reply_markup: {
-          inline_keyboard: [
-            [{ text: "📢 Join Channel", url: `https://t.me/${FORCE_JOIN_CHANNEL.replace("@", "")}` }]
-          ]
-        }
-      }
-    );
-    return;
-  }
+  if (!await checkMembership(msg)) return;
 
   if (!PUBLIC_MODE && !(await isUserApproved(msg.chat.id))) return;
   if (!guardCommandRateLimit(msg, "imagine")) return;
@@ -793,20 +754,8 @@ bot.onText(/\/imagine (.+)/, async (msg, match) => {
 //document analysis
 bot.on("document", async (msg) => {
   const chatId = msg.chat.id;
-  //force join
-  if (!(await isUserMember(chatId))) {
-    bot.sendMessage(chatId,
-      `⚠️ You must join our channel first to use this bot.`,
-      {
-        reply_markup: {
-          inline_keyboard: [
-            [{ text: "📢 Join Channel", url: `https://t.me/${FORCE_JOIN_CHANNEL.replace("@", "")}` }]
-          ]
-        }
-      }
-    );
-    return;
-  }
+
+  if (!await checkMembership(msg)) return;
 
   if (!PUBLIC_MODE && !(await isUserApproved(msg.chat.id))) return;
   if (!guardRateLimitMedia(msg)) return;
@@ -869,30 +818,14 @@ bot.on("document", async (msg) => {
   }
 });
 
-
 //image analysis
 bot.on("photo", async (msg) => {
   const chatId = msg.chat.id;
 
-  //force join
-  if (!(await isUserMember(chatId))) {
-    bot.sendMessage(chatId,
-      `⚠️ You must join our channel first to use this bot.`,
-      {
-        reply_markup: {
-          inline_keyboard: [
-            [{ text: "📢 Join Channel", url: `https://t.me/${FORCE_JOIN_CHANNEL.replace("@", "")}` }]
-          ]
-        }
-      }
-    );
-    return;
-  }
+  if (!await checkMembership(msg)) return;
 
   if (!PUBLIC_MODE && !(await isUserApproved(msg.chat.id))) return;
   if (!guardRateLimitMedia(msg)) return;
-
-
 
   const photo = msg.photo[msg.photo.length - 1]; // largest size
 
@@ -937,33 +870,16 @@ async function sendLongMessage(chatId, text) {
 // --- Chat with Gemini ---
 bot.on("message", async (msg) => {
   const chatId = msg.chat.id;
-
-  //force join
-  if (!(await isUserMember(chatId))) {
-    bot.sendMessage(chatId,
-      `⚠️ You must join our channel first to use this bot.`,
-      {
-        reply_markup: {
-          inline_keyboard: [
-            [{ text: "📢 Join Channel", url: `https://t.me/${FORCE_JOIN_CHANNEL.replace("@", "")}` }]
-          ]
-        }
-      }
-    );
-    return;
-  }
-
-  if (!await guardAccess(msg)) return;
-  if (!guardRateLimit(msg)) return;
-
   const text = msg.text;
 
   if (text && text.startsWith("/")) return; // ignore commands & empty
 
-  // Allow text messages here; ignore photo & document (handled elsewhere)
-  if (!msg.text) {
-    return;
-  }
+  if (!text) return;
+
+  if (!await checkMembership(msg)) return;
+
+  if (!await guardAccess(msg)) return;
+  if (!guardRateLimit(msg)) return;
 
   // Block pure link messages
   if (msg.text && /^https?:\/\//i.test(msg.text.trim())) {
@@ -983,8 +899,8 @@ bot.on("message", async (msg) => {
     return;
   }
 
-  if (text === "🤖 Set Model") {
-    bot.sendMessage(chatId, "Type /setmodel to choose your model.");
+  if (text === "🚫 Report Error") {
+    bot.sendMessage(chatId, "Contact @Dnafork_support to report any problem.");
     return;
   }
 
@@ -1180,9 +1096,7 @@ bot.on("message", async (msg) => {
 
 //broadcast 
 bot.onText(/\/broadcast (.+)/, async (msg, match) => {
-  if (msg.chat.id !== ADMIN_ID) {
-    return bot.sendMessage(msg.chat.id, "⚠️ Unauthorized");
-  }
+  if (msg.chat.id !== ADMIN_ID) return;
 
   const message = match[1];
 
@@ -1210,12 +1124,9 @@ bot.onText(/\/broadcast (.+)/, async (msg, match) => {
   }
 });
 
-
 //usage
 bot.onText(/\/usage/, async (msg) => {
-  if (msg.chat.id !== ADMIN_ID) {
-    return bot.sendMessage(msg.chat.id, "⚠️ Unauthorized");
-  }
+  if (msg.chat.id !== ADMIN_ID) return;
 
   try {
     const users = await User.find({});
@@ -1240,7 +1151,6 @@ Requests: ${u.requests}, Tokens: ${u.usage?.tokensUsed || 0}
   }
 });
 
-
 //see users
 bot.onText(/\/users/, async (msg) => { // 👈 Mark as async
   if (msg.chat.id !== ADMIN_ID) return;
@@ -1261,7 +1171,6 @@ bot.onText(/\/users/, async (msg) => { // 👈 Mark as async
   bot.sendMessage(ADMIN_ID, text, { parse_mode: "Markdown" });
 });
 
-
 //remove users
 bot.onText(/\/remove (\d+)/, async (msg, match) => {
   if (msg.chat.id !== ADMIN_ID) return;
@@ -1273,7 +1182,6 @@ bot.onText(/\/remove (\d+)/, async (msg, match) => {
   bot.sendMessage(ADMIN_ID, `❌ User ${userId} removed.`);
 });
 
-
 //user status
 bot.onText(/\/status/, async (msg) => {
   const chatId = msg.chat.id;
@@ -1283,36 +1191,27 @@ bot.onText(/\/status/, async (msg) => {
   }
 
   if (await isUserApproved(chatId)) {
-    bot.sendMessage(chatId, "✅ You have access to this bot. Contact: @dnafork_support for any problem");
+    bot.sendMessage(chatId, "✅ You have access to this bot.");
   } else {
     bot.sendMessage(chatId, "🚧 You do not have access.");
   }
 });
 
-
 //set bot public
 bot.onText(/\/public/, (msg) => {
-  if (msg.chat.id !== ADMIN_ID) {
-    bot.sendMessage(msg.chat.id, "⛔ Admin only command");
-    return;
-  }
+  if (msg.chat.id !== ADMIN_ID) return;
 
   PUBLIC_MODE = true;
   bot.sendMessage(msg.chat.id, "🔓 Bot is now in PUBLIC mode");
 });
 
-
 //set bot private 
 bot.onText(/\/private/, (msg) => {
-  if (msg.chat.id !== ADMIN_ID) {
-    bot.sendMessage(msg.chat.id, "⛔ Admin only command");
-    return;
-  }
+  if (msg.chat.id !== ADMIN_ID) return;
 
   PUBLIC_MODE = false;
   bot.sendMessage(msg.chat.id, "🔒 Bot is now in PRIVATE mode");
 });
-
 
 //set mode private or public
 bot.onText(/\/mode/, (msg) => {
