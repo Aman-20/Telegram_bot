@@ -426,8 +426,6 @@ bot.onText(/\/clearchat/, async (msg) => {
 
   if (!await checkMembership(msg)) return;
 
-  if (!PUBLIC_MODE && !(await isUserApproved(msg.chat.id))) return;
-
   let user = await User.findOne({ chatId });
   if (!user) {
     bot.sendMessage(chatId, "⚠️ No chat history found.");
@@ -494,7 +492,7 @@ async function guardAccess(msg) {
   const approved = await isUserApproved(chatId); // 👈 Checks DB now
 
   if (!approved) {
-    bot.sendMessage(chatId, "🚧 You do not have access. Contact: @dnafork_support");
+    bot.sendMessage(chatId, `🛡️ *Member Only*\nSorry, this feature is currently locked. Please reach out to ${FORCE_JOIN_CHANNEL} to get your account approved!`);
     return false;
   }
   return true;
@@ -505,9 +503,6 @@ bot.onText(/\/account/, async (msg) => {
   const chatId = msg.chat.id;
 
   if (!await checkMembership(msg)) return;
-
-  if (!PUBLIC_MODE && !(await isUserApproved(msg.chat.id))) return;
-
 
   // Fetch user from DB
   let user = await User.findOne({ chatId });
@@ -623,9 +618,9 @@ bot.onText(/\/search (.+)/, async (msg, match) => {
 
   if (!await checkMembership(msg)) return;
 
-  if (!PUBLIC_MODE && !(await isUserApproved(msg.chat.id))) return;
-  if (!guardCommandRateLimit(msg, "search")) return;
+  if (!await guardAccess(msg)) return;
 
+  if (!guardCommandRateLimit(msg, "search")) return;
 
   const query = match[1];
   bot.sendChatAction(chatId, "typing");
@@ -682,9 +677,6 @@ bot.onText(/\/setmodel/, async (msg) => {
 
   if (!await checkMembership(msg)) return;
 
-  if (!PUBLIC_MODE && !(await isUserApproved(msg.chat.id))) return;
-
-
   // Build buttons dynamically only for models with keys
   const buttons = Object.entries(MODELS)
     .map(([id, m]) => ({
@@ -725,7 +717,8 @@ bot.onText(/\/imagine (.+)/, async (msg, match) => {
 
   if (!await checkMembership(msg)) return;
 
-  if (!PUBLIC_MODE && !(await isUserApproved(msg.chat.id))) return;
+  if (!await guardAccess(msg)) return;
+
   if (!guardCommandRateLimit(msg, "imagine")) return;
 
   const prompt = match[1];
@@ -757,9 +750,9 @@ bot.on("document", async (msg) => {
 
   if (!await checkMembership(msg)) return;
 
-  if (!PUBLIC_MODE && !(await isUserApproved(msg.chat.id))) return;
-  if (!guardRateLimitMedia(msg)) return;
+  if (!await guardAccess(msg)) return;
 
+  if (!guardRateLimitMedia(msg)) return;
 
   const fileName = msg.document.file_name.toLowerCase();
 
@@ -824,7 +817,8 @@ bot.on("photo", async (msg) => {
 
   if (!await checkMembership(msg)) return;
 
-  if (!PUBLIC_MODE && !(await isUserApproved(msg.chat.id))) return;
+  if (!await guardAccess(msg)) return;
+
   if (!guardRateLimitMedia(msg)) return;
 
   const photo = msg.photo[msg.photo.length - 1]; // largest size
@@ -879,6 +873,7 @@ bot.on("message", async (msg) => {
   if (!await checkMembership(msg)) return;
 
   if (!await guardAccess(msg)) return;
+  
   if (!guardRateLimit(msg)) return;
 
   // Block pure link messages
@@ -900,7 +895,7 @@ bot.on("message", async (msg) => {
   }
 
   if (text === "🚫 Report Error") {
-    bot.sendMessage(chatId, "Contact @Dnafork_support to report any problem.");
+    bot.sendMessage(chatId, `Contact ${FORCE_JOIN_CHANNEL} to report any problem.`);
     return;
   }
 
