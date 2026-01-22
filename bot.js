@@ -517,6 +517,24 @@ bot.onText(/\/account/, async (msg) => {
     await user.save();
   }
 
+  // ✅ check todays date
+  const todayDate = new Date().toDateString();
+
+  // 1. Reset Requests if day changed
+  if (user.lastReset.toDateString() !== todayDate) {
+    user.requests = 0;
+    user.lastReset = new Date();
+  }
+
+  // 2. Reset Tokens if day changed
+  if (user.usage.resetDate.toDateString() !== todayDate) {
+    user.usage.tokensUsed = 0;
+    user.usage.resetDate = new Date();
+  }
+
+  // 3. Save the reset immediately so the numbers are correct
+  await user.save();
+
   const remainingRequests = DAILY_REQUEST_LIMIT - user.requests;
   const usedTokens = user.usage?.tokensUsed || 0;
   const remainingTokens = DAILY_TOKEN_LIMIT - usedTokens;
@@ -873,7 +891,7 @@ bot.on("message", async (msg) => {
   if (!await checkMembership(msg)) return;
 
   if (!await guardAccess(msg)) return;
-  
+
   if (!guardRateLimit(msg)) return;
 
   // Block pure link messages
